@@ -71,3 +71,25 @@ class RegressionTests(unittest.TestCase):
         cfg['phases'][0].pop('progress_jsonl')
         path.write_text(json.dumps(cfg))
         self.assertNotEqual(self.cli('start', str(path), '--wait-preflight', check=False).returncode, 0)
+
+    def test_older_checkpoint_cannot_overwrite_terminal_dispatch(self):
+        path, _ = self.cfg()
+        cfg = json.loads(path.read_text())
+        cfg['phases'][0]['checkpoint'] = True
+        cfg['wakeup']['command'] = [cfg['phases'][0]['command'][0], '-c',
+                                    "import time;time.sleep(2 if '{event}'=='CHECKPOINT' else 4)"]
+        path.write_text(json.dumps(cfg))
+        rid = self.cli('start', str(path)).stdout.strip()
+        for _ in range(100):
+            status = json.loads(self.cli('status', rid).stdout)
+            if status['status'] == 'WAITING_FOR_CODEX' and status['wake_status'] == 'dispatching':
+                break
+            time.sleep(.05)
+        self.cli('resume', rid, '--approve-checkpoint')
+        time.sleep(2.5)
+        with sqlite3.connect(self.state / 'state.sqlite3') as db:
+            wakes = dict(db.execute('SELECT event_key,status FROM wakeups WHERE run_id=?', (rid,)))
+        self.assertEqual(wakes.get('checkpoint:0:0'), 'sent')
+        self.assertEqual(wakes.get('terminal:succeeded'), 'dispatching')
+        self.assertEqual(json.loads(self.cli('status', rid).stdout)['wake_status'], 'dispatching')
+        self.assertEqual(self.wait(rid)['wake_status'], 'sent')

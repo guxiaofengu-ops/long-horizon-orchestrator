@@ -56,7 +56,7 @@ def workload(args):
         print(json.dumps(record), flush=True)
         if elapsed >= args.seconds and (not args.handoff_file or Path(args.handoff_file).exists()):
             break
-        time.sleep(max(.2, min(1 if step < 2 else 30, args.seconds - elapsed)))
+        time.sleep(max(1, min(1 if step < 2 else 30, args.seconds - elapsed)))
     atomic(Path(args.result), {'fixture': 'synthetic-numerical-soak', 'phase': args.phase,
                               'started_at': started, 'finished_at': time.time(),
                               'elapsed_seconds': time.monotonic() - mono,

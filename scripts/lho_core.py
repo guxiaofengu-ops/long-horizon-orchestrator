@@ -138,7 +138,9 @@ def wake(c,root,rid,key,status,detail):
                 for old,new in vals.items():a=a.replace(old,new)
                 cmd.append(a)
             subprocess.run(cmd,check=True,timeout=60);final="sent";info=None
-        c.execute("UPDATE wakeups SET status=?,updated=?,detail=? WHERE run_id=? AND event_key=?",(final,ts(),info,rid,key));c.execute("UPDATE runs SET wake_status=? WHERE id=?",(final,rid));c.commit();report(c,root,rid)
+        c.execute("UPDATE wakeups SET status=?,updated=?,detail=? WHERE run_id=? AND event_key=?",(final,ts(),info,rid,key))
+        # An older checkpoint may complete after the next terminal dispatch starts.
+        c.execute("UPDATE runs SET wake_status=? WHERE id=? AND (? LIKE 'terminal:%' OR status NOT IN ('SUCCEEDED','FAILED','CANCELLED','BUDGET_EXCEEDED')) AND NOT EXISTS (SELECT 1 FROM wakeups newer JOIN wakeups current ON current.run_id=newer.run_id WHERE current.run_id=? AND current.event_key=? AND newer.created>current.created)",(final,rid,key,rid,key));c.commit();report(c,root,rid)
     except BaseException as e:c.execute("UPDATE wakeups SET status='dispatch_unknown',updated=?,detail=? WHERE run_id=? AND event_key=?",(ts(),str(e),rid,key));c.execute("UPDATE runs SET wake_status='dispatch_unknown' WHERE id=?",(rid,));c.commit();report(c,root,rid)
 def stop_attempt(c,rid):
     x=row(c,rid);a=c.execute("SELECT * FROM attempts WHERE run_id=? AND status='RUNNING' ORDER BY id DESC LIMIT 1",(rid,)).fetchone()
@@ -157,7 +159,7 @@ def stop_attempt(c,rid):
     c.execute("UPDATE attempts SET status='CANCELLED',finished=? WHERE id=? AND status='RUNNING'",(ts(),a['id']));c.execute("UPDATE runs SET worker_pid=NULL WHERE id=?",(rid,));c.commit()
 def finish(c,root,x,status,detail):
     if status in {'CANCELLED','BUDGET_EXCEEDED'}:stop_attempt(c,x['id'])
-    c.execute("UPDATE runs SET status=?,finished=?,updated=?,last_error=? WHERE id=?",(status,ts(),ts(),None if status=="SUCCEEDED" else detail,x["id"]));c.commit();key="terminal:"+status.lower();event(c,x["id"],key,"terminal",{"status":status,"detail":detail});wake(c,root,x["id"],key,status,detail)
+    c.execute("UPDATE runs SET status=?,wake_status='pending',finished=?,updated=?,last_error=? WHERE id=?",(status,ts(),ts(),None if status=="SUCCEEDED" else detail,x["id"]));c.commit();key="terminal:"+status.lower();event(c,x["id"],key,"terminal",{"status":status,"detail":detail});wake(c,root,x["id"],key,status,detail)
 def supervise(root,rid):
     try:return _supervise(root,rid)
     finally:
