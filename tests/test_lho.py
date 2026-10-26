@@ -12,7 +12,7 @@ class Tests(unittest.TestCase):
  def wait(self,rid):
   for _ in range(200):
    x=json.loads(self.cli("status",rid).stdout)
-   if x["status"] in {"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"} and x["wake_status"]!="pending":return x
+   if x["status"] in {"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"} and x["wake_status"] in {'sent','manual_required','dispatch_unknown'}:return x
    time.sleep(.05)
   self.fail("timeout")
  def test_preflight_loop_wakeup(self):
@@ -32,7 +32,7 @@ class Tests(unittest.TestCase):
   p,w=self.cfg();c=json.loads(p.read_text());c["phases"][0]["checkpoint"]=True;p.write_text(json.dumps(c));rid=self.cli("start",str(p)).stdout.strip()
   for _ in range(100):
    x=json.loads(self.cli("status",rid).stdout)
-   if x["status"]=="WAITING_FOR_CODEX" and x["wake_status"]!="pending":break
+   if x["status"]=="WAITING_FOR_CODEX" and x["wake_status"]=='sent':break
    time.sleep(.05)
   self.assertEqual(x["status"],"WAITING_FOR_CODEX");self.assertNotEqual(self.cli("resume",rid,check=False).returncode,0);self.cli("resume",rid,"--approve-checkpoint");self.assertEqual(self.wait(rid)["status"],"SUCCEEDED");self.assertEqual(w.read_text(),"w\nw\n")
  def test_runner_disconnect_recovery(self):
