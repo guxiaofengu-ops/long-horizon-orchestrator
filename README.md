@@ -1,5 +1,7 @@
 <div align="center">
 
+**English** | [简体中文](README.zh-CN.md)
+
 <img src="docs/assets/mark.svg" width="92" alt="Long Horizon Orchestrator mark">
 
 # Long Horizon Orchestrator

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="一个用于长时间推理与训练循环的持久化 Codex Skill，让后台等待不再消耗模型调用。">
+  <link rel="canonical" href="https://guxiaofengu-ops.github.io/long-horizon-orchestrator/zh/">
+  <link rel="alternate" hreflang="en" href="https://guxiaofengu-ops.github.io/long-horizon-orchestrator/">
+  <link rel="alternate" hreflang="zh-CN" href="https://guxiaofengu-ops.github.io/long-horizon-orchestrator/zh/">
+  <link rel="alternate" hreflang="x-default" href="https://guxiaofengu-ops.github.io/long-horizon-orchestrator/">
+  <meta name="theme-color" content="#111827">
+  <title>Long Horizon Orchestrator — 持久化 Codex Pipeline</title>
+  <link rel="icon" href="../assets/mark.svg" type="image/svg+xml"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../locale.css">
+</head>
+<body>
+  <header class="wrap nav"><a class="brand" href="#top"><img src="../assets/mark.svg" alt=""><span>Long Horizon</span></a><nav class="navlinks" aria-label="主导航"><a href="#architecture">架构</a><a href="#guarantees">边界</a><a class="locale" href="../" lang="en">English</a><a href="https://github.com/guxiaofengu-ops/long-horizon-orchestrator" class="button">查看 GitHub ↗</a></nav></header>
+  <main id="top">
+    <section class="wrap hero">
+      <div><div class="eyebrow">为耗时工作而生的 Codex Skill</div><h1>不要再花模型用量盯着进度条。</h1><p>通过持久化本地状态机运行推理、训练、评估和多轮 Pipeline。Codex 检查启动过程，真正结束当前回合，只在证据需要判断时返回。</p><div class="actions"><a class="button" href="#install">安装 Skill</a><a class="button alt" href="https://github.com/guxiaofengu-ops/long-horizon-orchestrator/blob/main/references/zh-CN/task-contract.md">阅读任务契约 ↗</a></div></div>
+      <div class="terminal" aria-label="运行状态示例"><div class="dots"><i></i><i></i><i></i></div><pre><span class="accent">$</span> scripts/lho start run.json --wait-preflight
+
+run 86d7… 已启动
+step 1  数据加载完成       <span class="ok">正常</span>
+step 2  首个 batch         <span class="ok">正常</span>
+
+Codex 当前回合可以结束。
+Runner：独立运行 · 模型调用：<span class="ok">0</span>
+
+… 推理完成 …
+验证器                   <span class="ok">通过</span>
+状态                     WAITING_FOR_CODEX
+唤醒                     仅排队一次</pre></div>
+    </section>
+    <section class="section"><div class="wrap"><div class="section-head"><h2>判断保持智能，等待交给基础设施。</h2><p>Runner 处理确定性工作：进程、超时、产物、重试、租约和状态转换。Codex 仅在显式审查边界、严重失败或最终完成时出现。</p></div><div class="grid">
+      <article class="card"><span class="num">01 / 持久化</span><h3>断线可恢复状态</h3><p>SQLite WAL、原子 Worker 结果和可续租租约，让替代 Watchdog 在不重复工作的前提下继续运行。</p></article>
+      <article class="card"><span class="num">02 / 证据</span><h3>验证后才算成功</h3><p>退出码为零只是开始。新鲜文件、JSON 字段、大小和阶段证据必须全部通过。</p></article>
+      <article class="card"><span class="num">03 / 有界</span><h3>有限运行是结构要求</h3><p>墙钟时间、阶段次数、失败、重试、迭代和日志都有显式上限。</p></article>
+      <article class="card"><span class="num">04 / 恢复</span><h3>官方唤醒路径</h3><p>向受管理的 Codex 线程排入消息，或恢复持久化 CLI 会话，不把键盘自动化伪装成 API。</p></article>
+      <article class="card"><span class="num">05 / 调度</span><h3>面向真实调度系统</h3><p>同一份契约可以使用本地独立 Runner、tmux、SLURM 或用户级 systemd。</p></article>
+      <article class="card"><span class="num">06 / 控制</span><h3>完整运维入口</h3><p>状态、日志、附加、暂停、恢复、检查点批准、取消和权威 JSON 报告。</p></article>
+    </div></div></section>
+    <section class="section" id="architecture"><div class="wrap"><div class="section-head"><h2>每个边界都有真实状态。</h2><p>每次交接都有持久化状态和明确责任方，不存在悄悄留在后台的 Agent。</p></div><div class="flow"><div class="node"><strong>Codex 修改</strong><span>Pipeline 与契约</span></div><div class="node"><strong>启动预检</strong><span>前 N 个进度事件</span></div><div class="node"><strong>独立 Worker</strong><span>等待期间零模型调用</span></div><div class="node decision"><strong>判断检查点</strong><span>验证、唤醒、审查</span></div><div class="node"><strong>继续推进</strong><span>训练、循环或结束</span></div></div></div></section>
+    <section class="section" id="guarantees"><div class="wrap"><div class="section-head"><h2>明确说明能保证什么，也说明不能保证什么。</h2><p>长程自动化只有在边界清晰时才值得信任。</p></div><div class="truth"><article class="yes"><h3>可以保证</h3><ul><li>机械等待期间不调用模型</li><li>状态转换和尝试证据持久化</li><li>重试和资源消耗有明确上限</li><li>重复事件不会重复推进</li><li>检查点必须经显式审查才能继续</li></ul></article><article class="no"><h3>不会虚假承诺</h3><ul><li>进程退出就等于成功</li><li>所有外部 API 都能严格恰好投递一次</li><li>无关的原生 TUI 会实时重绘</li><li>未审查 Shell 契约是安全的</li><li>主机上一定安装了所有调度器</li></ul></article></div></div></section>
+    <section class="section" id="install"><div class="wrap install"><div><div class="eyebrow">开始使用</div><h2>一个仓库，运行时零第三方依赖。</h2><p>克隆到 Codex Skills 目录，然后重新开始一个对话。Runner 仅使用 Python 标准库。</p><span class="badge">Python 3.10+</span><span class="badge">MIT</span></div><div class="code">git clone https://github.com/guxiaofengu-ops/long-horizon-orchestrator.git \
+  ~/.codex/skills/long-horizon-orchestrator
+
+~/.codex/skills/long-horizon-orchestrator/scripts/lho doctor</div></div></section>
+  </main>
+  <footer class="wrap footer"><span>Long Horizon Orchestrator · MIT</span><span>为可观察、有限的自动化而构建。</span></footer>
+</body>
+</html>

@@ -1,0 +1,4 @@
+.locale{font-weight:750;color:var(--orange);border-left:1px solid var(--line);padding-left:24px}
+html[lang="zh-CN"] body{font-family:"PingFang SC","Microsoft YaHei",Inter,ui-sans-serif,system-ui,sans-serif}
+html[lang="zh-CN"] .hero h1,html[lang="zh-CN"] .section h2{font-family:"Songti SC","STSong",Georgia,serif;letter-spacing:-.035em}
+@media(max-width:850px){.locale{display:inline!important;border-left:0;padding-left:0}}

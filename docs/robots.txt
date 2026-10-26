@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://guxiaofengu-ops.github.io/long-horizon-orchestrator/sitemap.xml

@@ -6,13 +6,16 @@ Environment: macOS arm64, Python 3.13.3, SQLite 3.49.2, Codex CLI 0.154.0, Codex
 
 - Skill structure validator: `Skill is valid!`
 - Python syntax compilation: passed
-- Six subprocess end-to-end tests: passed in 4.320 seconds
+- Six subprocess end-to-end runner tests: passed
   - two-step preflight, inference→training, two iterations, and one terminal wakeup
   - failed command is not reported as success
   - duplicate supervisor and duplicate progress ingestion are idempotent
   - pause and resume between scheduled phases
   - explicit inference checkpoint, required review acknowledgement, then training
   - runner process loss while worker continues, followed by persisted recovery
+- Two documentation tests: passed
+  - English and Simplified Chinese routes expose reciprocal `hreflang` metadata
+  - README language switches and all local page assets resolve
 - Locally generated Codex App Server schema contains `thread/resume` and `turn/start`.
 
 The wakeup lifecycle was exercised with the deterministic `command` adapter. A real `codex queue` was intentionally not sent to the user's current conversation during packaging, so real-thread delivery is supported by the verified CLI surface but not claimed as exercised here.
