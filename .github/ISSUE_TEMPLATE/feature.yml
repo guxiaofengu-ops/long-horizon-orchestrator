@@ -1,0 +1,16 @@
+name: Feature request
+description: Propose a focused capability or integration
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: Use case
+      description: What long-running workflow needs this, and why do existing controls not cover it?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposed contract or state transition
+    validations:
+      required: true

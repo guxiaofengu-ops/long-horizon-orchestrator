@@ -1,0 +1,27 @@
+name: Bug report
+description: Report a reproducible state-machine or runner problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Include the expected and observed state transitions. Remove secrets and sensitive paths.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Minimal contract
+      render: json
+  - type: textarea
+    attributes:
+      label: Environment
+      description: OS, Python version, scheduler backend, and Codex CLI version if relevant.
+    validations:
+      required: true
+  - type: checkboxes
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, private logs, and customer data.
+          required: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Long Horizon Orchestrator"
+  short_description: "Durable pipelines with bounded Codex wakeups"
+  default_prompt: "Use $long-horizon-orchestrator to run this pipeline as a durable background loop and resume this session only for decisions."
+policy:
+  allow_implicit_invocation: true

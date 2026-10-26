@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A durable Codex Skill for long-running inference and training loops without model-powered polling.">
+  <meta name="theme-color" content="#111827">
+  <title>Long Horizon Orchestrator — durable Codex pipelines</title>
+  <link rel="icon" href="assets/mark.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="wrap nav"><a class="brand" href="#top"><img src="assets/mark.svg" alt=""><span>Long Horizon</span></a><nav class="navlinks" aria-label="Main navigation"><a href="#architecture">Architecture</a><a href="#guarantees">Guarantees</a><a href="https://github.com/guxiaofengu-ops/long-horizon-orchestrator" class="button">View on GitHub ↗</a></nav></header>
+  <main id="top">
+    <section class="wrap hero">
+      <div><div class="eyebrow">A Codex Skill for work that takes time</div><h1>Stop paying an agent to watch a progress bar.</h1><p>Run inference, training, evaluation, and repeated pipelines through a durable local state machine. Codex checks the launch, ends its turn, and returns only when evidence needs judgment.</p><div class="actions"><a class="button" href="#install">Install the skill</a><a class="button alt" href="https://github.com/guxiaofengu-ops/long-horizon-orchestrator/blob/main/references/task-contract.md">Read the contract ↗</a></div></div>
+      <div class="terminal" aria-label="Example run status"><div class="dots"><i></i><i></i><i></i></div><pre><span class="accent">$</span> scripts/lho start run.json --wait-preflight
+
+run 86d7… started
+step 1  data loaded       <span class="ok">healthy</span>
+step 2  first batch       <span class="ok">healthy</span>
+
+Codex turn can end now.
+Runner: detached · model calls: <span class="ok">0</span>
+
+… inference completes …
+validators               <span class="ok">passed</span>
+state                     WAITING_FOR_CODEX
+wakeup                    queued once</pre></div>
+    </section>
+    <section class="section"><div class="wrap"><div class="section-head"><h2>Judgment stays intelligent. Waiting becomes infrastructure.</h2><p>The runner handles deterministic work—processes, timeouts, artifacts, retries, leases, and transitions. Codex appears only at explicit review boundaries, serious failures, or final completion.</p></div><div class="grid">
+      <article class="card"><span class="num">01 / PERSIST</span><h3>Crash-resilient state</h3><p>SQLite WAL state, atomic worker results, and renewable leases let a replacement watchdog continue without duplicating work.</p></article>
+      <article class="card"><span class="num">02 / PROVE</span><h3>Evidence before success</h3><p>Exit zero is only the start. Fresh file, JSON-key, size, and custom phase evidence must all validate.</p></article>
+      <article class="card"><span class="num">03 / BOUND</span><h3>Finite by construction</h3><p>Wall time, phase runs, failures, retries, iterations, and logs all have explicit ceilings.</p></article>
+      <article class="card"><span class="num">04 / RESUME</span><h3>Official wakeup paths</h3><p>Queue into a managed Codex thread or resume a persisted CLI session—without pretending keyboard automation is an API.</p></article>
+      <article class="card"><span class="num">05 / OPERATE</span><h3>Built for real schedulers</h3><p>Use a detached local runner, tmux, a SLURM allocation, or a user systemd unit with the same contract.</p></article>
+      <article class="card"><span class="num">06 / CONTROL</span><h3>Operator escape hatches</h3><p>Status, logs, attach, pause, resume, checkpoint approval, cancel, and an authoritative JSON report.</p></article>
+    </div></div></section>
+    <section class="section" id="architecture"><div class="wrap"><div class="section-head"><h2>A loop with real boundaries.</h2><p>Each handoff has a persisted state and a concrete owner. No invisible agent remains alive in the background.</p></div><div class="flow"><div class="node"><strong>Codex edits</strong><span>Pipeline and contract</span></div><div class="node"><strong>Preflight</strong><span>First N progress events</span></div><div class="node"><strong>Worker</strong><span>No model calls while waiting</span></div><div class="node decision"><strong>Checkpoint</strong><span>Validate, wake, review</span></div><div class="node"><strong>Advance</strong><span>Train, loop, or finish</span></div></div></div></section>
+    <section class="section" id="guarantees"><div class="wrap"><div class="section-head"><h2>Honest about what it can—and cannot—guarantee.</h2><p>Long-running automation becomes trustworthy when its edges are explicit.</p></div><div class="truth"><article class="yes"><h3>It does guarantee</h3><ul><li>No model calls during mechanical waiting</li><li>Persisted transitions and attempt evidence</li><li>Bounded retry and resource behavior</li><li>Duplicate-resistant event handling</li><li>Explicit review before checkpoint advance</li></ul></article><article class="no"><h3>It does not claim</h3><ul><li>That process exit alone means success</li><li>Exactly-once delivery across every external API</li><li>Live repainting of an unrelated native TUI</li><li>Safety for unreviewed shell contracts</li><li>Availability of schedulers not installed on the host</li></ul></article></div></div></section>
+    <section class="section" id="install"><div class="wrap install"><div><div class="eyebrow">Get started</div><h2>One repository. No runtime dependencies.</h2><p>Clone it into the Codex skills directory, then start a fresh turn. The runner itself uses only Python's standard library.</p><span class="badge">Python 3.10+</span><span class="badge">MIT</span></div><div class="code">git clone https://github.com/guxiaofengu-ops/long-horizon-orchestrator.git \
+  ~/.codex/skills/long-horizon-orchestrator
+
+~/.codex/skills/long-horizon-orchestrator/scripts/lho doctor</div></div></section>
+  </main>
+  <footer class="wrap footer"><span>Long Horizon Orchestrator · MIT</span><span>Built for observable, bounded automation.</span></footer>
+</body>
+</html>
