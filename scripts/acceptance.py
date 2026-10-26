@@ -64,8 +64,7 @@ def workload(args):
                               'mse': sample, 'ok': True})
 
 
-CONFIG = ['model_providers.openai.supports_websockets=false',
-          'sandbox_mode="danger-full-access"', 'approval_policy="never"']
+CONFIG = ['sandbox_mode="danger-full-access"', 'approval_policy="never"']
 
 
 def codex_turn(output, thread_id, prompt, cwd):
