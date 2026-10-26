@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse,json,os,shutil,signal,sqlite3,subprocess,sys,time,uuid
+import argparse,json,os,shutil,signal,sqlite3,subprocess,sys,time,uuid,shlex
 from pathlib import Path
 TERMINAL={"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"}
 SCHEMA="""PRAGMA journal_mode=WAL;
@@ -52,14 +52,14 @@ def event(c,rid,key,kind,payload):
     try: c.execute("INSERT INTO events(run_id,event_key,kind,created,payload) VALUES(?,?,?,?,?)",(rid,key,kind,ts(),json.dumps(payload))); c.commit(); return True
     except sqlite3.IntegrityError:return False
 def launch(root,rid,backend):
-    cmd=[str(Path(__file__).with_name("lho")),"--state-dir",str(root),"supervise",rid]; log=open(rdir(root,rid)/"supervisor.log","ab",buffering=0)
+    cmd=[sys.executable,str(Path(__file__).with_name("lho")),"--state-dir",str(root),"supervise",rid]; log=open(rdir(root,rid)/"supervisor.log","ab",buffering=0)
     if backend=="local": return str(subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,start_new_session=True).pid)
     if backend=="tmux":
         if not shutil.which("tmux"):raise RuntimeError("tmux unavailable")
-        name="lho-"+rid[:12]; subprocess.run(["tmux","new-session","-d","-s",name,*cmd],check=True); return name
+        name="lho-"+rid[:12]; subprocess.run(["tmux","new-session","-d","-s",name,shlex.join(cmd)],check=True); return name
     if backend=="slurm":
         if not shutil.which("sbatch"):raise RuntimeError("sbatch unavailable")
-        return subprocess.run(["sbatch","--parsable","--output",str(rdir(root,rid)/"supervisor.log"),"--wrap",subprocess.list2cmdline(cmd)],check=True,text=True,capture_output=True).stdout.strip()
+        return subprocess.run(["sbatch","--parsable","--output",str(rdir(root,rid)/"supervisor.log"),"--wrap",shlex.join(cmd)],check=True,text=True,capture_output=True).stdout.strip()
     if backend=="systemd":
         if not shutil.which("systemd-run"):raise RuntimeError("systemd-run unavailable")
         name="lho-"+rid[:12]; subprocess.run(["systemd-run","--user","--unit",name,"--collect",*cmd],check=True); return name
@@ -86,17 +86,23 @@ def progress(c,x,cfg,phase,attempt):
     if not phase.get("progress_jsonl"):return
     p=inside(Path(cfg["workspace"]),phase["progress_jsonl"])
     if not p.exists():return
-    try: lines=p.read_text().splitlines()
+    try: lines=p.read_text().splitlines(keepends=True)
     except Exception:return
+    attempt_row=c.execute('SELECT spec_path FROM attempts WHERE run_id=? AND iteration=? AND phase_index=? AND attempt=?',(x['id'],x['iteration'],x['phase_index'],attempt)).fetchone()
+    baseline=json.loads(Path(attempt_row['spec_path']).read_text()).get('progress_baseline',[]) if attempt_row else []
     n=x["preflight_seen"]
     for i,line in enumerate(lines):
+        if not line.endswith('\n') or (i<len(baseline) and line==baseline[i]):continue
         try: payload=json.loads(line)
         except json.JSONDecodeError:continue
+        if not isinstance(payload,dict):continue
         if event(c,x["id"],f"progress:{x['iteration']}:{x['phase_index']}:{attempt}:{i}","progress",payload):n+=1
     c.execute("UPDATE runs SET preflight_seen=?,preflight_passed=MAX(preflight_passed,?),updated=? WHERE id=?",(n,int(n>=int(cfg["preflight_steps"])),ts(),x["id"])); c.commit()
 def start_attempt(c,root,x,cfg,phase,n):
     d=rdir(root,x["id"]); tag=f"i{x['iteration']}-p{x['phase_index']}-a{n}"; sp=d/"attempts"/(tag+".spec.json"); rp=d/"attempts"/(tag+".result.json"); pp=d/"attempts"/(tag+".pid")
-    sp.write_text(json.dumps({"command":phase["command"],"shell":phase.get("shell",False),"workspace":cfg["workspace"],"env":phase.get("env",{}),"timeout_seconds":phase.get("timeout_seconds"),"log_path":str(d/"run.log")}))
+    progress_path=inside(Path(cfg['workspace']),phase['progress_jsonl']) if phase.get('progress_jsonl') else None
+    baseline=progress_path.read_text().splitlines(keepends=True) if progress_path and progress_path.exists() else []
+    sp.write_text(json.dumps({"command":phase["command"],"shell":phase.get("shell",False),"workspace":cfg["workspace"],"env":phase.get("env",{}),"timeout_seconds":phase.get("timeout_seconds"),"log_path":str(d/"run.log"),'progress_baseline':baseline}))
     out=open(d/"worker-launch.log","ab",buffering=0); proc=subprocess.Popen([sys.executable,str(Path(__file__).with_name("lho_worker.py")),"--spec",str(sp),"--result",str(rp),"--pid-file",str(pp)],stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,start_new_session=True)
     c.execute("INSERT INTO attempts(run_id,iteration,phase_index,phase_name,attempt,status,started,spec_path,result_path,pid_path) VALUES(?,?,?,?,?,'RUNNING',?,?,?,?)",(x["id"],x["iteration"],x["phase_index"],phase["name"],n,ts(),str(sp),str(rp),str(pp)))
     c.execute("UPDATE runs SET status='RUNNING',worker_pid=?,phase_runs=phase_runs+1,updated=? WHERE id=?",(proc.pid,ts(),x["id"]));c.commit();event(c,x["id"],"start:"+tag,"phase_started",{"phase":phase["name"],"attempt":n})
@@ -107,36 +113,74 @@ def wake(c,root,rid,key,status,detail):
     cfg=json.loads(row(c,rid)["contract"]);w=cfg["wakeup"]
     try:c.execute("INSERT INTO wakeups VALUES(?,?,?, ?,?,?)",(rid,key,"dispatching",ts(),ts(),None));c.commit()
     except sqlite3.IntegrityError:return
+    c.execute("UPDATE runs SET wake_status='dispatching' WHERE id=?",(rid,));c.commit()
     report(c,root,rid); rp=str(rdir(root,rid)/"report.json"); msg=f"Long-horizon run {rid} reached {status}: {detail}. Read {rp}, verify evidence and budgets, then decide whether another bounded run is needed."
     try:
         mode=w.get("mode","none")
         if mode=="none": final="manual_required"; info=msg
         elif mode=="codex_queue":subprocess.run([w.get("codex_bin","codex"),"queue","--thread",w["thread_id"],"--message",msg],check=True,capture_output=True,timeout=60);final="sent";info=None
         elif mode=="codex_exec":
-            out=open(rdir(root,rid)/"codex-resume.jsonl","ab",buffering=0);subprocess.Popen([w.get("codex_bin","codex"),"exec","resume",w["thread_id"],msg,"--json"],stdout=out,stderr=subprocess.STDOUT,start_new_session=True);final="sent";info="spawned exec resume"
+            # A detached process is not evidence of a successfully resumed turn.
+            suffix=key.replace(':','-');output=rdir(root,rid)/f"codex-{suffix}.jsonl"
+            cmd=[w.get("codex_bin","codex"),"exec","resume",w["thread_id"],msg,"--json","--skip-git-repo-check"]
+            for option in w.get("config",[]):cmd.extend(["-c",option])
+            with open(output,"ab",buffering=0) as out:
+                completed=subprocess.run(cmd,cwd=cfg["workspace"],stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,timeout=float(w.get("timeout_seconds",300)))
+            notifications=[]
+            for line in output.read_text(errors='replace').splitlines():
+                try:notifications.append(json.loads(line))
+                except json.JSONDecodeError:pass
+            if completed.returncode!=0 or not any(e.get('type')=='turn.completed' for e in notifications) or any(e.get('type')=='turn.failed' for e in notifications):raise RuntimeError(f"Codex resume failed; inspect {output}")
+            final="sent";info=f"completed Codex turn; evidence={output}"
         else:
             vals={"{run_id}":rid,"{event}":status,"{report}":rp,"{message}":msg};cmd=[]
             for a in w["command"]:
                 for old,new in vals.items():a=a.replace(old,new)
                 cmd.append(a)
             subprocess.run(cmd,check=True,timeout=60);final="sent";info=None
-        c.execute("UPDATE wakeups SET status=?,updated=?,detail=? WHERE run_id=? AND event_key=?",(final,ts(),info,rid,key));c.execute("UPDATE runs SET wake_status=? WHERE id=?",(final,rid));c.commit()
-    except BaseException as e:c.execute("UPDATE wakeups SET status='dispatch_unknown',updated=?,detail=? WHERE run_id=? AND event_key=?",(ts(),str(e),rid,key));c.execute("UPDATE runs SET wake_status='dispatch_unknown' WHERE id=?",(rid,));c.commit()
+        c.execute("UPDATE wakeups SET status=?,updated=?,detail=? WHERE run_id=? AND event_key=?",(final,ts(),info,rid,key));c.execute("UPDATE runs SET wake_status=? WHERE id=?",(final,rid));c.commit();report(c,root,rid)
+    except BaseException as e:c.execute("UPDATE wakeups SET status='dispatch_unknown',updated=?,detail=? WHERE run_id=? AND event_key=?",(ts(),str(e),rid,key));c.execute("UPDATE runs SET wake_status='dispatch_unknown' WHERE id=?",(rid,));c.commit();report(c,root,rid)
+def stop_attempt(c,rid):
+    x=row(c,rid);a=c.execute("SELECT * FROM attempts WHERE run_id=? AND status='RUNNING' ORDER BY id DESC LIMIT 1",(rid,)).fetchone()
+    if not a:return
+    try:pid=int(Path(a['pid_path']).read_text())
+    except (OSError,ValueError):pid=None
+    for target in (pid,x['worker_pid']):
+        if target and alive(target):
+            try:os.killpg(target,signal.SIGTERM)
+            except OSError:pass
+    deadline=time.monotonic()+2
+    while pid and alive(pid) and time.monotonic()<deadline:time.sleep(.05)
+    if pid and alive(pid):
+        try:os.killpg(pid,signal.SIGKILL)
+        except OSError:pass
+    c.execute("UPDATE attempts SET status='CANCELLED',finished=? WHERE id=? AND status='RUNNING'",(ts(),a['id']));c.execute("UPDATE runs SET worker_pid=NULL WHERE id=?",(rid,));c.commit()
 def finish(c,root,x,status,detail):
+    if status in {'CANCELLED','BUDGET_EXCEEDED'}:stop_attempt(c,x['id'])
     c.execute("UPDATE runs SET status=?,finished=?,updated=?,last_error=? WHERE id=?",(status,ts(),ts(),None if status=="SUCCEEDED" else detail,x["id"]));c.commit();key="terminal:"+status.lower();event(c,x["id"],key,"terminal",{"status":status,"detail":detail});wake(c,root,x["id"],key,status,detail)
 def supervise(root,rid):
-    c=connect(root);owner=str(uuid.uuid4())
+    try:return _supervise(root,rid)
+    finally:
+        c=connect(root)
+        # Only the process holding this supervisor's owner token may release it.
+        owner=f"{os.getpid()}"
+        c.execute("UPDATE runs SET lease_owner=NULL,lease_until=NULL WHERE id=? AND lease_owner=?",(rid,owner));c.commit();c.close()
+def _supervise(root,rid):
+    c=connect(root);owner=f"{os.getpid()}"
     if not lease(c,rid,owner):return 0
     while True:
         x=row(c,rid);cfg=json.loads(x["contract"]);b=cfg["budget"]
-        if x["status"] in TERMINAL:return 0
+        if x["status"] in TERMINAL:
+            if x['wake_status']=='pending':wake(c,root,rid,'terminal:'+x['status'].lower(),x['status'],x['last_error'] or 'recovered terminal event')
+            return 0
+        if x['status']=='WAITING_FOR_CODEX':return 0
         if x["cancel_requested"]:
             if alive(x["worker_pid"]):
                 try:os.killpg(x["worker_pid"],signal.SIGTERM)
                 except OSError:pass
             finish(c,root,x,"CANCELLED","operator cancellation");return 0
         log=rdir(root,rid)/"run.log"
-        if ts()-x["started"]>int(b["max_wall_seconds"]) or x["phase_runs"]>=int(b["max_phase_runs"]) or (log.exists() and log.stat().st_size>int(b["max_log_bytes"])):finish(c,root,x,"BUDGET_EXCEEDED","run budget exhausted");return 0
+        if ts()-x["started"]>int(b["max_wall_seconds"]) or (log.exists() and log.stat().st_size>int(b["max_log_bytes"])):finish(c,root,x,"BUDGET_EXCEEDED","run budget exhausted");return 0
         phase=cfg["phases"][x["phase_index"]];a=c.execute("SELECT * FROM attempts WHERE run_id=? AND iteration=? AND phase_index=? ORDER BY attempt DESC LIMIT 1",(rid,x["iteration"],x["phase_index"])).fetchone()
         if a and a["status"]=="RUNNING":
             progress(c,x,cfg,phase,a["attempt"]);rp=Path(a["result_path"])
@@ -156,14 +200,18 @@ def supervise(root,rid):
                 else:
                     c.execute("UPDATE runs SET failures=failures+1,last_error=?,updated=? WHERE id=?",(detail,ts(),rid));c.commit();x=row(c,rid)
                     if x["failures"]>=int(b["max_failures"]) or a["attempt"]>=int(phase.get("retry",{}).get("max_attempts",1)):finish(c,root,x,"FAILED",detail);return 0
-                    time.sleep(float(phase.get("retry",{}).get("backoff_seconds",0)))
                 continue
             try:pid=int(Path(a["pid_path"]).read_text())
             except Exception:pid=x["worker_pid"]
             if not alive(pid) and ts()-a["started"]>2:rp.write_text(json.dumps({"worker_error":"worker disappeared without result","exit_code":None}))
-            lease(c,rid,owner);time.sleep(.1);continue
+            if not lease(c,rid,owner):return 0
+            time.sleep(.5);continue
         x=row(c,rid)
         if x["pause_requested"]:c.execute("UPDATE runs SET status='PAUSED',updated=? WHERE id=?",(ts(),rid));c.commit();return 0
+        if a and a['status']=='FAILED' and ts()<a['finished']+float(phase.get('retry',{}).get('backoff_seconds',0)):
+            if not lease(c,rid,owner):return 0
+            time.sleep(.5);continue
+        if x['phase_runs']>=int(b['max_phase_runs']):finish(c,root,x,'BUDGET_EXCEEDED','phase-run budget exhausted before next launch');return 0
         n=c.execute("SELECT COALESCE(MAX(attempt),0)+1 FROM attempts WHERE run_id=? AND iteration=? AND phase_index=?",(rid,x["iteration"],x["phase_index"])).fetchone()[0];start_attempt(c,root,x,cfg,phase,n);lease(c,rid,owner)
 def public(x):return {k:x[k] for k in ("id","name","status","iteration","phase_index","phase_runs","failures","preflight_seen","preflight_passed","backend","scheduler_id","worker_pid","last_error","wake_status")}
 def main(argv=None):
@@ -194,7 +242,7 @@ def main(argv=None):
                 x=row(c,rid)
                 if x["preflight_passed"] or x["status"] in TERMINAL:break
                 time.sleep(.1)
-            x=row(c,rid);print(json.dumps({"status":x["status"],"preflight_seen":x["preflight_seen"],"preflight_passed":bool(x["preflight_passed"])}));return 0 if x["preflight_passed"] or x["status"] in TERMINAL else 3
+            x=row(c,rid);print(json.dumps({"status":x["status"],"preflight_seen":x["preflight_seen"],"preflight_passed":bool(x["preflight_passed"])}));return 1 if x['status'] in TERMINAL-{'SUCCEEDED'} else (0 if x["preflight_passed"] or x["status"]=='SUCCEEDED' else 3)
         return 0
     if a.cmd=="supervise":return supervise(root,a.run_id)
     c=connect(root);x=row(c,a.run_id)

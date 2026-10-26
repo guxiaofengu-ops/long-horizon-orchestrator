@@ -8,7 +8,7 @@ class Tests(unittest.TestCase):
   wake=self.b/"wake";code=f"import json,time,pathlib;p=pathlib.Path('p');p.write_text(json.dumps({{'step':1}})+'\\n'+json.dumps({{'step':2}})+'\\n');time.sleep(.15);pathlib.Path('a.json').write_text(json.dumps({{'ok':1}}));raise SystemExit({int(fail)})"
   train=code.replace("a.json","model.json").replace(f"SystemExit({int(fail)})","SystemExit(0)")
   c={"schema_version":1,"name":"t","workspace":str(self.ws),"preflight_steps":2,"phases":[{"name":"inference","command":[sys.executable,"-c",code],"progress_jsonl":"p","success":[{"type":"json","path":"a.json","required_keys":["ok"]}]},{"name":"training","command":[sys.executable,"-c",train],"success":[{"type":"json","path":"model.json","required_keys":["ok"]}]}],"loop":{"max_iterations":iters},"budget":{"max_wall_seconds":20,"max_phase_runs":8,"max_failures":2,"max_log_bytes":100000},"wakeup":{"mode":"command","command":[sys.executable,"-c",f"from pathlib import Path;Path({str(wake)!r}).open('a').write('w\\n')"]}};p=self.b/"c.json";p.write_text(json.dumps(c));return p,wake
- def cli(self,*a,check=True):return subprocess.run([str(CLI),"--state-dir",str(self.state),*a],text=True,capture_output=True,check=check,timeout=15)
+ def cli(self,*a,check=True):return subprocess.run([sys.executable,str(CLI),"--state-dir",str(self.state),*a],text=True,capture_output=True,check=check,timeout=20)
  def wait(self,rid):
   for _ in range(200):
    x=json.loads(self.cli("status",rid).stdout)
@@ -20,7 +20,7 @@ class Tests(unittest.TestCase):
  def test_failure_not_success(self):
   p,w=self.cfg(fail=True);rid=self.cli("start",str(p)).stdout.strip();self.assertEqual(self.wait(rid)["status"],"FAILED");self.assertTrue(w.exists())
  def test_duplicate_supervisor_idempotent(self):
-  p,w=self.cfg();rid=self.cli("start",str(p)).stdout.strip();extra=subprocess.Popen([str(CLI),"--state-dir",str(self.state),"supervise",rid]);extra.wait(timeout=5);self.assertEqual(self.wait(rid)["status"],"SUCCEEDED");self.assertEqual(w.read_text(),"w\n");c=sqlite3.connect(self.state/"state.sqlite3");self.assertEqual(c.execute("select count(*) from events where kind='progress'").fetchone()[0],2)
+  p,w=self.cfg();rid=self.cli("start",str(p)).stdout.strip();extra=subprocess.Popen([sys.executable,str(CLI),"--state-dir",str(self.state),"supervise",rid]);extra.wait(timeout=5);self.assertEqual(self.wait(rid)["status"],"SUCCEEDED");self.assertEqual(w.read_text(),"w\n");c=sqlite3.connect(self.state/"state.sqlite3");self.assertEqual(c.execute("select count(*) from events where kind='progress'").fetchone()[0],2)
  def test_pause_resume(self):
   p,_=self.cfg(iters=2);rid=self.cli("start",str(p)).stdout.strip();self.cli("pause",rid)
   for _ in range(100):
