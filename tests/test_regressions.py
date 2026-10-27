@@ -5,6 +5,8 @@ import sqlite3
 import time
 import unittest
 import test_lho
+from contextlib import closing
+from lho_process import alive
 
 
 class RegressionTests(unittest.TestCase):
@@ -57,13 +59,12 @@ class RegressionTests(unittest.TestCase):
         path.write_text(json.dumps(cfg))
         rid = self.cli('start', str(path)).stdout.strip()
         time.sleep(.3)
-        with sqlite3.connect(self.state / 'state.sqlite3') as db:
+        with closing(sqlite3.connect(self.state / 'state.sqlite3')) as db:
             pid_file = db.execute('SELECT pid_path FROM attempts WHERE run_id=?', (rid,)).fetchone()[0]
         from pathlib import Path
         child_pid = int(Path(pid_file).read_text())
         self.assertEqual(self.wait(rid)['status'], 'BUDGET_EXCEEDED')
-        with self.assertRaises(ProcessLookupError):
-            os.kill(child_pid, 0)
+        self.assertFalse(alive(child_pid))
 
     def test_failed_start_returns_nonzero(self):
         path, _ = self.cfg(fail=True)
@@ -87,7 +88,7 @@ class RegressionTests(unittest.TestCase):
             time.sleep(.05)
         self.cli('resume', rid, '--approve-checkpoint')
         time.sleep(2.5)
-        with sqlite3.connect(self.state / 'state.sqlite3') as db:
+        with closing(sqlite3.connect(self.state / 'state.sqlite3')) as db:
             wakes = dict(db.execute('SELECT event_key,status FROM wakeups WHERE run_id=?', (rid,)))
         self.assertEqual(wakes.get('checkpoint:0:0'), 'sent')
         self.assertEqual(wakes.get('terminal:succeeded'), 'dispatching')

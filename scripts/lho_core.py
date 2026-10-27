@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse,json,os,shutil,signal,sqlite3,subprocess,sys,time,uuid,shlex
 from pathlib import Path
+from lho_process import WINDOWS,alive,detached_options,identity,stop_named_job,stop_worker
 TERMINAL={"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"}
 SCHEMA="""PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,name TEXT,status TEXT,contract TEXT,created REAL,updated REAL,started REAL,finished REAL,iteration INTEGER DEFAULT 0,phase_index INTEGER DEFAULT 0,phase_runs INTEGER DEFAULT 0,failures INTEGER DEFAULT 0,preflight_seen INTEGER DEFAULT 0,preflight_passed INTEGER DEFAULT 0,backend TEXT,scheduler_id TEXT,worker_pid INTEGER,lease_owner TEXT,lease_until REAL,pause_requested INTEGER DEFAULT 0,cancel_requested INTEGER DEFAULT 0,last_error TEXT,wake_status TEXT DEFAULT 'pending');
@@ -18,7 +19,7 @@ def inside(ws,raw):
     if p!=ws and ws not in p.parents: raise ValueError(f"path escapes workspace: {raw}")
     return p
 def contract(path):
-    c=json.loads(Path(path).read_text()); ws=Path(c.get("workspace","")).expanduser().resolve()
+    c=json.loads(Path(path).read_text(encoding="utf-8")); ws=Path(c.get("workspace","")).expanduser().resolve()
     if c.get("schema_version")!=1 or not c.get("name") or not ws.is_dir(): raise ValueError("schema_version=1, name, and existing workspace required")
     ps=c.get("phases",[])
     if not ps or len({x.get('name') for x in ps})!=len(ps): raise ValueError("nonempty phases with unique names required")
@@ -44,16 +45,12 @@ def row(c,rid):
     x=c.execute("SELECT * FROM runs WHERE id=?",(rid,)).fetchone()
     if not x: raise SystemExit(f"unknown run: {rid}")
     return x
-def alive(pid):
-    if not pid:return False
-    try: os.kill(pid,0); return True
-    except (OSError,PermissionError): return False
 def event(c,rid,key,kind,payload):
     try: c.execute("INSERT INTO events(run_id,event_key,kind,created,payload) VALUES(?,?,?,?,?)",(rid,key,kind,ts(),json.dumps(payload))); c.commit(); return True
     except sqlite3.IntegrityError:return False
 def launch(root,rid,backend):
     cmd=[sys.executable,str(Path(__file__).with_name("lho")),"--state-dir",str(root),"supervise",rid]; log=open(rdir(root,rid)/"supervisor.log","ab",buffering=0)
-    if backend=="local": return str(subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,start_new_session=True).pid)
+    if backend=="local": return str(subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,**detached_options()).pid)
     if backend=="tmux":
         if not shutil.which("tmux"):raise RuntimeError("tmux unavailable")
         name="lho-"+rid[:12]; subprocess.run(["tmux","new-session","-d","-s",name,shlex.join(cmd)],check=True); return name
@@ -77,7 +74,7 @@ def validators(cfg,phase,res):
             if not p.is_file() or p.stat().st_size<int(v.get("min_bytes",1)):return False,f"missing/small artifact: {p}"
             if not v.get("allow_stale",False) and p.stat().st_mtime+1 < float(res.get("started_at",0)):return False,f"stale artifact: {p}"
             if v["type"]=="json":
-                try: val=json.loads(p.read_text())
+                try: val=json.loads(p.read_text(encoding="utf-8"))
                 except Exception as e:return False,f"invalid JSON: {e}"
                 for k in v.get("required_keys",[]):
                     if not isinstance(val,dict) or k not in val:return False,f"missing JSON key: {k}"
@@ -86,10 +83,10 @@ def progress(c,x,cfg,phase,attempt):
     if not phase.get("progress_jsonl"):return
     p=inside(Path(cfg["workspace"]),phase["progress_jsonl"])
     if not p.exists():return
-    try: lines=p.read_text().splitlines(keepends=True)
+    try: lines=p.read_text(encoding="utf-8").splitlines(keepends=True)
     except Exception:return
     attempt_row=c.execute('SELECT spec_path FROM attempts WHERE run_id=? AND iteration=? AND phase_index=? AND attempt=?',(x['id'],x['iteration'],x['phase_index'],attempt)).fetchone()
-    baseline=json.loads(Path(attempt_row['spec_path']).read_text()).get('progress_baseline',[]) if attempt_row else []
+    baseline=json.loads(Path(attempt_row['spec_path']).read_text(encoding="utf-8")).get('progress_baseline',[]) if attempt_row else []
     n=x["preflight_seen"]
     for i,line in enumerate(lines):
         if not line.endswith('\n') or (i<len(baseline) and line==baseline[i]):continue
@@ -101,9 +98,10 @@ def progress(c,x,cfg,phase,attempt):
 def start_attempt(c,root,x,cfg,phase,n):
     d=rdir(root,x["id"]); tag=f"i{x['iteration']}-p{x['phase_index']}-a{n}"; sp=d/"attempts"/(tag+".spec.json"); rp=d/"attempts"/(tag+".result.json"); pp=d/"attempts"/(tag+".pid")
     progress_path=inside(Path(cfg['workspace']),phase['progress_jsonl']) if phase.get('progress_jsonl') else None
-    baseline=progress_path.read_text().splitlines(keepends=True) if progress_path and progress_path.exists() else []
-    sp.write_text(json.dumps({"command":phase["command"],"shell":phase.get("shell",False),"workspace":cfg["workspace"],"env":phase.get("env",{}),"timeout_seconds":phase.get("timeout_seconds"),"log_path":str(d/"run.log"),'progress_baseline':baseline}))
-    out=open(d/"worker-launch.log","ab",buffering=0); proc=subprocess.Popen([sys.executable,str(Path(__file__).with_name("lho_worker.py")),"--spec",str(sp),"--result",str(rp),"--pid-file",str(pp)],stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,start_new_session=True)
+    baseline=progress_path.read_text(encoding="utf-8").splitlines(keepends=True) if progress_path and progress_path.exists() else []
+    sp.write_text(json.dumps({"command":phase["command"],"shell":phase.get("shell",False),"workspace":cfg["workspace"],"env":phase.get("env",{}),"timeout_seconds":phase.get("timeout_seconds"),"log_path":str(d/"run.log"),'progress_baseline':baseline,'cancel_path':str(sp)+'.cancel','windows_job_name':'Local\\lho-'+uuid.uuid4().hex}))
+    out=open(d/"worker-launch.log","ab",buffering=0); proc=subprocess.Popen([sys.executable,str(Path(__file__).with_name("lho_worker.py")),"--spec",str(sp),"--result",str(rp),"--pid-file",str(pp)],stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,**detached_options())
+    Path(str(sp)+'.worker.json').write_text(json.dumps(identity(proc.pid)))
     c.execute("INSERT INTO attempts(run_id,iteration,phase_index,phase_name,attempt,status,started,spec_path,result_path,pid_path) VALUES(?,?,?,?,?,'RUNNING',?,?,?,?)",(x["id"],x["iteration"],x["phase_index"],phase["name"],n,ts(),str(sp),str(rp),str(pp)))
     c.execute("UPDATE runs SET status='RUNNING',worker_pid=?,phase_runs=phase_runs+1,updated=? WHERE id=?",(proc.pid,ts(),x["id"]));c.commit();event(c,x["id"],"start:"+tag,"phase_started",{"phase":phase["name"],"attempt":n})
 def report(c,root,rid):
@@ -127,7 +125,7 @@ def wake(c,root,rid,key,status,detail):
             with open(output,"ab",buffering=0) as out:
                 completed=subprocess.run(cmd,cwd=cfg["workspace"],stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,timeout=float(w.get("timeout_seconds",300)))
             notifications=[]
-            for line in output.read_text(errors='replace').splitlines():
+            for line in output.read_text(encoding="utf-8",errors='replace').splitlines():
                 try:notifications.append(json.loads(line))
                 except json.JSONDecodeError:pass
             if completed.returncode!=0 or not any(e.get('type')=='turn.completed' for e in notifications) or any(e.get('type')=='turn.failed' for e in notifications):raise RuntimeError(f"Codex resume failed; inspect {output}")
@@ -145,17 +143,30 @@ def wake(c,root,rid,key,status,detail):
 def stop_attempt(c,rid):
     x=row(c,rid);a=c.execute("SELECT * FROM attempts WHERE run_id=? AND status='RUNNING' ORDER BY id DESC LIMIT 1",(rid,)).fetchone()
     if not a:return
-    try:pid=int(Path(a['pid_path']).read_text())
+    try:pid=int(Path(a['pid_path']).read_text(encoding="utf-8"))
     except (OSError,ValueError):pid=None
-    for target in (pid,x['worker_pid']):
-        if target and alive(target):
-            try:os.killpg(target,signal.SIGTERM)
-            except OSError:pass
-    deadline=time.monotonic()+2
-    while pid and alive(pid) and time.monotonic()<deadline:time.sleep(.05)
+    spec=json.loads(Path(a['spec_path']).read_text(encoding='utf-8'))
+    Path(spec['cancel_path']).touch()
+    if WINDOWS:stop_named_job(spec['windows_job_name'])
+    else:
+        for target in (pid,x['worker_pid']):
+            if target and alive(target):
+                try:os.killpg(target,signal.SIGTERM)
+                except ProcessLookupError:pass
+    deadline=time.monotonic()+3
+    while x['worker_pid'] and alive(x['worker_pid']) and time.monotonic()<deadline:time.sleep(.05)
+    if x['worker_pid'] and alive(x['worker_pid']):
+        if WINDOWS:
+            proof=Path(str(a['spec_path'])+'.worker.json')
+            stop_worker(x['worker_pid'],json.loads(proof.read_text(encoding='utf-8')))
+            stop_named_job(spec['windows_job_name'])
+        else:
+            try:os.killpg(x['worker_pid'],signal.SIGKILL)
+            except ProcessLookupError:pass
     if pid and alive(pid):
+        if WINDOWS:raise RuntimeError('owned workload is still live after cancellation')
         try:os.killpg(pid,signal.SIGKILL)
-        except OSError:pass
+        except ProcessLookupError:pass
     c.execute("UPDATE attempts SET status='CANCELLED',finished=? WHERE id=? AND status='RUNNING'",(ts(),a['id']));c.execute("UPDATE runs SET worker_pid=NULL WHERE id=?",(rid,));c.commit()
 def finish(c,root,x,status,detail):
     if status in {'CANCELLED','BUDGET_EXCEEDED'}:stop_attempt(c,x['id'])
@@ -177,9 +188,6 @@ def _supervise(root,rid):
             return 0
         if x['status']=='WAITING_FOR_CODEX':return 0
         if x["cancel_requested"]:
-            if alive(x["worker_pid"]):
-                try:os.killpg(x["worker_pid"],signal.SIGTERM)
-                except OSError:pass
             finish(c,root,x,"CANCELLED","operator cancellation");return 0
         log=rdir(root,rid)/"run.log"
         if ts()-x["started"]>int(b["max_wall_seconds"]) or (log.exists() and log.stat().st_size>int(b["max_log_bytes"])):finish(c,root,x,"BUDGET_EXCEEDED","run budget exhausted");return 0
@@ -187,7 +195,7 @@ def _supervise(root,rid):
         if a and a["status"]=="RUNNING":
             progress(c,x,cfg,phase,a["attempt"]);rp=Path(a["result_path"])
             if rp.exists():
-                res=json.loads(rp.read_text());ok,detail=validators(cfg,phase,res);c.execute("UPDATE attempts SET status=?,finished=?,result=? WHERE id=?",("SUCCEEDED" if ok else "FAILED",ts(),json.dumps(res),a["id"]));c.execute("UPDATE runs SET worker_pid=NULL,updated=? WHERE id=?",(ts(),rid));c.commit();event(c,rid,f"finish:{a['id']}","phase_finished",{"ok":ok,"detail":detail})
+                res=json.loads(rp.read_text(encoding="utf-8"));ok,detail=validators(cfg,phase,res);c.execute("UPDATE attempts SET status=?,finished=?,result=? WHERE id=?",("SUCCEEDED" if ok else "FAILED",ts(),json.dumps(res),a["id"]));c.execute("UPDATE runs SET worker_pid=NULL,updated=? WHERE id=?",(ts(),rid));c.commit();event(c,rid,f"finish:{a['id']}","phase_finished",{"ok":ok,"detail":detail})
                 if ok:
                     x=row(c,rid)
                     if x["iteration"]==0 and x["phase_index"]==0:c.execute("UPDATE runs SET preflight_passed=1 WHERE id=?",(rid,));c.commit();x=row(c,rid)
@@ -203,7 +211,7 @@ def _supervise(root,rid):
                     c.execute("UPDATE runs SET failures=failures+1,last_error=?,updated=? WHERE id=?",(detail,ts(),rid));c.commit();x=row(c,rid)
                     if x["failures"]>=int(b["max_failures"]) or a["attempt"]>=int(phase.get("retry",{}).get("max_attempts",1)):finish(c,root,x,"FAILED",detail);return 0
                 continue
-            try:pid=int(Path(a["pid_path"]).read_text())
+            try:pid=int(Path(a["pid_path"]).read_text(encoding="utf-8"))
             except Exception:pid=x["worker_pid"]
             if not alive(pid) and ts()-a["started"]>2:rp.write_text(json.dumps({"worker_error":"worker disappeared without result","exit_code":None}))
             if not lease(c,rid,owner):return 0
@@ -230,7 +238,7 @@ def main(argv=None):
     s.add_parser("doctor");a=p.parse_args(argv);root=rootof(a.state_dir)
     if a.cmd=="validate":contract(a.contract);print("valid");return 0
     if a.cmd=="doctor":
-        d={"python":sys.version.split()[0],"sqlite":sqlite3.sqlite_version,"codex":shutil.which("codex"),"tmux":shutil.which("tmux"),"sbatch":shutil.which("sbatch"),"systemd_run":shutil.which("systemd-run"),"state_dir":str(root)}
+        d={"python":sys.version.split()[0],"platform":sys.platform,"process_tree_backend":"windows_job_object" if WINDOWS else "posix_process_group","sqlite":sqlite3.sqlite_version,"codex":shutil.which("codex"),"tmux":shutil.which("tmux"),"sbatch":shutil.which("sbatch"),"systemd_run":shutil.which("systemd-run"),"state_dir":str(root)}
         if d["codex"]:d["codex_version"]=subprocess.run([d["codex"],"--version"],text=True,capture_output=True).stdout.strip()
         print(json.dumps(d,indent=2));return 0
     if a.cmd=="start":
@@ -252,9 +260,8 @@ def main(argv=None):
     if a.cmd=="pause":c.execute("UPDATE runs SET pause_requested=1,updated=? WHERE id=?",(ts(),a.run_id));c.commit();print("pause requested");return 0
     if a.cmd=="cancel":
         c.execute("UPDATE runs SET cancel_requested=1,lease_until=NULL,updated=? WHERE id=?",(ts(),a.run_id));c.commit()
-        if alive(x["worker_pid"]):
-            try:os.killpg(x["worker_pid"],signal.SIGTERM)
-            except OSError:pass
+        attempt=c.execute("SELECT spec_path FROM attempts WHERE run_id=? AND status='RUNNING' ORDER BY id DESC LIMIT 1",(a.run_id,)).fetchone()
+        if attempt:Path(json.loads(Path(attempt['spec_path']).read_text(encoding='utf-8'))['cancel_path']).touch()
         launch(root,a.run_id,"local");print("cancel requested");return 0
     if a.cmd=="resume":
         if a.retry_wakeup and x["wake_status"]=="dispatch_unknown":c.execute("DELETE FROM wakeups WHERE run_id=? AND status='dispatch_unknown'",(a.run_id,));c.execute("UPDATE runs SET wake_status='pending' WHERE id=?",(a.run_id,));c.commit();wake(c,root,a.run_id,f"manual:{int(ts())}",x["status"],x["last_error"] or "manual retry")
@@ -273,11 +280,11 @@ def main(argv=None):
         return 0
     if a.cmd in {"logs","attach"}:
         path=rdir(root,a.run_id)/"run.log";follow=a.follow or a.cmd=="attach";pos=0
-        if path.exists():data=path.read_text(errors="replace").splitlines();print("\n".join(data[-a.lines:]));pos=path.stat().st_size
+        if path.exists():data=path.read_text(encoding="utf-8",errors="replace").splitlines();print("\n".join(data[-a.lines:]));pos=path.stat().st_size
         while follow:
             x=row(c,a.run_id)
             if path.exists():
-                with open(path,errors="replace") as f:f.seek(pos);z=f.read();pos=f.tell()
+                with open(path,encoding="utf-8",errors="replace") as f:f.seek(pos);z=f.read();pos=f.tell()
                 if z:print(z,end="",flush=True)
             if x["status"] in TERMINAL or x["status"]=="PAUSED":print(json.dumps(public(x)));break
             time.sleep(.25)

@@ -13,7 +13,7 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.10", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
@@ -22,6 +22,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile
-        run: python -m py_compile scripts/lho_core.py scripts/lho_worker.py
+        run: python -m py_compile scripts/lho_core.py scripts/lho_worker.py scripts/lho_process.py
       - name: End-to-end tests
         run: python -m unittest discover -s tests -v

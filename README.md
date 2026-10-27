@@ -121,7 +121,7 @@ scripts/lho report RUN_ID --json
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m py_compile scripts/lho_core.py scripts/lho_worker.py
+python3 -m py_compile scripts/lho_core.py scripts/lho_worker.py scripts/lho_process.py
 ```
 
 验收覆盖两步预检、推理 → 训练循环、判断检查点、失败处理、暂停恢复、重复 Supervisor/事件和 Runner 断线恢复。详见 [TEST_RESULTS.md](TEST_RESULTS.md)。
@@ -132,7 +132,7 @@ python3 -m py_compile scripts/lho_core.py scripts/lho_worker.py
 
 ## 项目状态
 
-核心 Runner 已可使用，并在 macOS + Python 3.13 上完成测试。SLURM 和 systemd 适配器需要部署主机安装相应原生命令。真实会话投递依赖 Codex 宿主和经过验证的 thread ID。
+核心 Runner 支持 macOS/Linux 的 POSIX 进程组和 Windows 的原生 Job Object；Windows 使用 `python scripts/lho ...`。平台验证记录见 [TEST_RESULTS.md](TEST_RESULTS.md)，操作细节见 [Windows 运行说明](references/windows.md)。SLURM 和 systemd 适配器需要部署主机安装相应原生命令。真实会话投递依赖 Codex 宿主和经过验证的 thread ID。
 
 ## 参与贡献
 
