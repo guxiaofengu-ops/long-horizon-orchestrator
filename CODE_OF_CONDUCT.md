@@ -1,7 +1,7 @@
-# Code of Conduct
+# 行为准则
 
-We are committed to a welcoming, harassment-free project for everyone.
+我们致力于为所有人营造友好、无骚扰的项目环境。
 
-Be respectful, constructive, and specific. Assume good intent while taking responsibility for impact. Harassment, discrimination, threats, deliberate disruption, and publication of private information are not acceptable.
+请保持尊重、建设性和具体明确。在善意理解他人的同时，也要为自身行为造成的影响负责。骚扰、歧视、威胁、蓄意干扰以及公开他人隐私信息均不可接受。
 
-Maintainers may edit, remove, or reject contributions and may temporarily or permanently restrict participation when necessary to protect the community. Report conduct concerns privately to the repository owner through GitHub.
+为保护社区，维护者可以编辑、删除或拒绝贡献，并可在必要时暂时或永久限制参与。请通过 GitHub 私下向仓库所有者报告行为方面的问题。

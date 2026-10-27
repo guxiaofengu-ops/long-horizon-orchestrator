@@ -1,27 +1,27 @@
-# Acceptance results — 2026-10-26
+# 验收结果 — 2026-10-26
 
-Environment: macOS arm64, Python 3.13.3, SQLite 3.49.2, Codex CLI 0.154.0, Codex Desktop 26.1013.31256.
+环境：macOS arm64、Python 3.13.3、SQLite 3.49.2、Codex CLI 0.154.0、Codex Desktop 26.1013.31256。
 
-## Passed
+## 已通过
 
-- Skill structure validator: `Skill is valid!`
-- Python syntax compilation: passed
-- Six subprocess end-to-end runner tests: passed
-  - two-step preflight, inference→training, two iterations, and one terminal wakeup
-  - failed command is not reported as success
-  - duplicate supervisor and duplicate progress ingestion are idempotent
-  - pause and resume between scheduled phases
-  - explicit inference checkpoint, required review acknowledgement, then training
-  - runner process loss while worker continues, followed by persisted recovery
-- Two documentation tests: passed
-  - English and Simplified Chinese routes expose reciprocal `hreflang` metadata
-  - README language switches and all local page assets resolve
-- Locally generated Codex App Server schema contains `thread/resume` and `turn/start`.
+- Skill 结构验证器：`Skill is valid!`
+- Python 语法编译：通过
+- 六个基于子进程的端到端 Runner 测试：通过
+  - 两步预检、推理→训练、两轮迭代和一次最终唤醒
+  - 失败命令不会被报告为成功
+  - 重复 Supervisor 和重复进度摄取保持幂等
+  - 在已调度阶段之间暂停和恢复
+  - 显式推理检查点、必需的审查确认，然后进入训练
+  - Runner 进程丢失时 Worker 继续运行，随后从持久状态恢复
+- 两个文档测试：通过
+  - 英文和简体中文路由公开互相对应的 `hreflang` 元数据
+  - README 语言切换和所有本地页面资源均可解析
+- 本地生成的 Codex App Server schema 包含 `thread/resume` 和 `turn/start`。
 
-The wakeup lifecycle was exercised with the deterministic `command` adapter. A real `codex queue` was intentionally not sent to the user's current conversation during packaging, so real-thread delivery is supported by the verified CLI surface but not claimed as exercised here.
+唤醒生命周期使用确定性的 `command` 适配器完成检验。打包时有意没有向用户当前对话发送真实 `codex queue`，因此真实 thread 投递受已验证的 CLI 接口支持，但这里不声称已经实际检验。
 
-## Environment findings
+## 环境发现
 
-`codex doctor --json` found authentication, configuration, installation, state databases, and Desktop installation readable. Its overall result was failure because the noninteractive test shell has `TERM=dumb`; it also reported optional CDN/WebSocket warnings and thread inventory differences. HTTPS inference reachability was present. These findings were not changed by this project.
+`codex doctor --json` 确认认证、配置、安装、状态数据库和 Desktop 安装均可读取。由于非交互测试 shell 使用 `TERM=dumb`，总体结果为失败；它还报告了可选的 CDN/WebSocket 警告和 thread 清单差异。HTTPS 推理端点可达。本项目没有更改这些环境状况。
 
-The installed CLI is 0.154.0 while the local update cache reports 0.164.0. No update was performed because upgrading the user's global toolchain is outside the skill implementation.
+已安装的 CLI 版本为 0.154.0，而本地更新缓存报告 0.164.0。由于升级用户的全局工具链不属于本 Skill 的实现范围，因此未执行更新。

@@ -1,10 +1,10 @@
-## Summary
+## 摘要
 
-## State transition or contract impact
+## 对状态转换或契约的影响
 
-## Verification
+## 验证
 
-- [ ] Python files compile
-- [ ] End-to-end tests pass
-- [ ] New behavior has an observable test
-- [ ] No credentials, private logs, or customer artifacts are included
+- [ ] Python 文件编译通过
+- [ ] 端到端测试通过
+- [ ] 新行为有可观察的测试
+- [ ] 不包含凭据、私有日志或客户产物

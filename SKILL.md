@@ -5,25 +5,25 @@ description: Run durable inference/training or other long pipelines outside the 
 
 # Long Horizon Orchestrator
 
-Move mechanical waiting out of the Codex turn. Keep judgment in Codex.
+把机械等待移出 Codex 回合，把判断留给 Codex。
 
-1. Inspect the pipeline, success artifacts, progress signal, safe stop behavior, and cost limits. Never invent success evidence.
-2. Read [task-contract.md](references/task-contract.md) and create a JSON contract. Prefer argv arrays; opt into shell only when required.
-3. Obtain the current Codex thread ID from trusted host context. Never guess it. If unavailable, use `wakeup.mode: "none"`.
-4. Run `python3 scripts/lho start CONTRACT --wait-preflight` (the Python prefix also works after archive installation without executable bits). Inspect early steps and the launch log. If healthy, end the Codex turn; never poll long work with model calls.
-5. The detached runner owns waiting, phase transitions, retries, validation, budgets, and wakeup. On resume, run `scripts/lho report RUN_ID --json`, verify evidence, and start another bounded run only if termination has not been met.
+1. 检查 pipeline、成功产物、进度信号、安全停止行为和成本上限。绝不虚构成功证据。
+2. 阅读 [task-contract.md](references/task-contract.md) 并创建 JSON 契约。优先使用 argv 数组；仅在确有需要时启用 shell。
+3. 从可信宿主上下文获取当前 Codex thread ID。绝不猜测；无法获取时使用 `wakeup.mode: "none"`。
+4. 运行 `python3 scripts/lho start CONTRACT --wait-preflight`（从归档安装且没有可执行位时，Python 前缀同样有效）。检查早期步骤和启动日志。确认健康后结束 Codex 回合；绝不使用模型调用轮询长任务。
+5. 独立 Runner 负责等待、阶段转换、重试、验证、预算和唤醒。恢复后运行 `scripts/lho report RUN_ID --json`，核验证据；仅在尚未满足终止条件时启动下一次有界运行。
 
-Use `status`, `logs`, `attach`, `pause`, `resume`, `cancel`, and `report`. Read [operations.md](references/operations.md). Keep a persistent supervisor service or independent watchdog for unattended recovery; a detached local process alone is not an OS reboot service.
+使用 `status`、`logs`、`attach`、`pause`、`resume`、`cancel` 和 `report`。阅读 [operations.md](references/operations.md)。无人值守恢复需要持久 Supervisor 服务或独立 Watchdog；仅有独立本地进程并不等于操作系统重启服务。
 
-## Boundaries
+## 边界
 
-- Waiting makes no model calls. Only the configured official wakeup adapter may queue/start a Codex turn.
-- Prefer `codex queue --thread ... --message ...` for a managed App Server thread. `codex exec resume` is a fallback whose output belongs to its new process.
-- Never inject keys, scrape a terminal, or promise an already-open native TUI will repaint. Read [codex-support.md](references/codex-support.md).
-- Keep validators inside the workspace, preserve authorization boundaries, and never put secrets in contracts/logs/prompts.
-- Pause finishes the active command and stops scheduling. Cancel terminates the exact recorded process group.
-- Require finite wall-time, iteration, failure, phase-run, and log-size budgets. Retry only explicitly retryable work.
-- Success requires zero exit plus every declared validator. Submitted/running/exited alone is not success.
-- Wakeup is conservative at-most-once. Ambiguous dispatch is surfaced, not blindly retried.
+- 等待过程不发起模型调用。只有已配置的官方唤醒适配器可以排入或启动 Codex 回合。
+- 对受管理的 App Server thread，优先使用 `codex queue --thread ... --message ...`。`codex exec resume` 是回退方案，其输出属于新进程。
+- 不注入按键、不抓取终端，也不承诺已打开的原生 TUI 会刷新。阅读 [codex-support.md](references/codex-support.md)。
+- 将验证器限制在 workspace 内，遵守授权边界，绝不在契约、日志或 prompt 中放置秘密信息。
+- `pause` 会等待当前命令结束并停止调度；`cancel` 会终止精确记录的进程组。
+- 墙钟时间、迭代次数、失败次数、阶段运行次数和日志大小都必须有有限预算。仅重试明确标记为可重试的工作。
+- 成功要求退出码为零且通过所有已声明验证器。仅有 submitted、running 或 exited 状态不代表成功。
+- 唤醒采用保守的至多一次语义。投递不明确时应显式暴露，而不是盲目重试。
 
-Handoff must state run ID, paths, backend, preflight evidence, budgets, wakeup mode, recovery command, and whether a real Codex wakeup was exercised.
+交接时必须说明 run ID、路径、后端、预检证据、预算、唤醒模式、恢复命令，以及是否实际执行过真实 Codex 唤醒。

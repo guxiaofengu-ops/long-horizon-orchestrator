@@ -1,13 +1,13 @@
-# Security policy
+# 安全策略
 
-## Supported versions
+## 支持的版本
 
-Security fixes are applied to the latest release and the `main` branch.
+安全修复会应用到最新发布版本和 `main` 分支。
 
-## Reporting a vulnerability
+## 报告漏洞
 
-Please use GitHub private vulnerability reporting for this repository. Do not include live credentials, sensitive logs, or customer data. If private reporting is unavailable, open a minimal issue asking the maintainer to enable a private channel without disclosing the vulnerability.
+请使用本仓库的 GitHub 私密漏洞报告功能。不要包含有效凭据、敏感日志或客户数据。如果无法进行私密报告，请创建一条最小化 issue，请维护者启用私密渠道，但不要公开漏洞内容。
 
-## Operational boundary
+## 运行边界
 
-This tool executes commands with the invoking user's permissions. Review every task contract before starting it. Prefer argv arrays over shell strings, use a dedicated workspace, set finite budgets, and use least-privilege scheduler/service accounts. Wakeup thread IDs are routing metadata, not authorization tokens.
+本工具以调用用户的权限执行命令。启动前应审查每份任务契约。优先使用 argv 数组而不是 shell 字符串，使用专用 workspace，设置有限预算，并为调度器或服务使用最小权限账户。唤醒 thread ID 是路由元数据，不是授权令牌。

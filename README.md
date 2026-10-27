@@ -1,83 +1,83 @@
 <div align="center">
 
-**English** | [简体中文](README.zh-CN.md)
+[English](README.en.md) | **简体中文**
 
-<img src="docs/assets/mark.svg" width="92" alt="Long Horizon Orchestrator mark">
+<img src="docs/assets/mark.svg" width="92" alt="Long Horizon Orchestrator 标识">
 
 # Long Horizon Orchestrator
 
-**Let Codex make decisions—not spend tokens watching jobs run.**
+**让 Codex 负责判断，而不是消耗模型用量等待任务结束。**
 
-A durable Codex Skill for inference → review → training loops with SQLite state, detached workers, bounded preflight checks, and official session wakeups.
+一个用于“推理 → 审查 → 训练”长程循环的持久化 Codex Skill，内置 SQLite 状态、独立 Worker、有限启动预检和官方会话唤醒。
 
 [![Tests](https://github.com/guxiaofengu-ops/long-horizon-orchestrator/actions/workflows/test.yml/badge.svg)](https://github.com/guxiaofengu-ops/long-horizon-orchestrator/actions/workflows/test.yml)
-[![Skill validation](https://img.shields.io/badge/Codex%20Skill-valid-16a34a)](SKILL.md)
+[![Codex Skill](https://img.shields.io/badge/Codex%20Skill-valid-16a34a)](SKILL.md)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776ab)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b.svg)](LICENSE)
+[![MIT](https://img.shields.io/badge/License-MIT-f59e0b.svg)](LICENSE)
 
-[Live documentation](https://guxiaofengu-ops.github.io/long-horizon-orchestrator/) · [Quick start](#quick-start) · [Task contract](references/task-contract.md) · [Operations](references/operations.md)
+[中文展示页](https://guxiaofengu-ops.github.io/long-horizon-orchestrator/zh/) · [快速开始](#快速开始) · [任务契约](references/task-contract.md) · [运维说明](references/operations.md)
 
 </div>
 
-## Why this exists
+## 为什么需要它
 
-Long inference and training jobs should not keep an agent turn—and its model context—alive for hours. Long Horizon Orchestrator separates judgment from waiting:
+长时间推理和训练不应该让一个 Agent 回合及其模型上下文持续数小时。Long Horizon Orchestrator 把“判断”和“等待”分开：
 
 ```text
-Codex edits pipeline
+Codex 修改 pipeline
         │
         ▼
-bounded preflight ── healthy ──▶ Codex turn ends
-        │                              │
-        ▼                              ▼
-detached worker ◀── SQLite state ── watchdog
+有限启动预检 ── 正常 ──▶ Codex 回合真正结束
+        │                         │
+        ▼                         ▼
+独立 Worker ◀── SQLite 状态 ── Watchdog
         │
-        ├── validated checkpoint ──▶ official Codex wakeup ──▶ review
-        ├── serious failure ───────▶ official Codex wakeup ──▶ diagnose
-        └── terminal success ──────▶ official Codex wakeup ──▶ report
+        ├── 验证后的检查点 ──▶ 官方 Codex 唤醒 ──▶ 分析
+        ├── 严重失败 ───────▶ 官方 Codex 唤醒 ──▶ 诊断
+        └── 最终成功 ───────▶ 官方 Codex 唤醒 ──▶ 报告
 ```
 
-During the long wait, the runner makes **zero model calls**.
+后台机械等待期间，Runner 的模型调用次数为 **0**。
 
-## Highlights
+## 核心能力
 
-- Durable SQLite state machine with lease-based duplicate protection
-- Independent phase workers that survive runner disconnection
-- Inference/training loops with explicit AI review checkpoints
-- Local, tmux, SLURM, and systemd scheduler backends
-- Artifact freshness, JSON, file-size, and exit-code validation
-- Wall-time, phase-run, failure, and log-size budgets
-- Idempotent event ingestion and conservative at-most-once wakeups
-- Official `codex queue` integration, with `codex exec resume` fallback
-- Honest terminal boundary: no keyboard injection or PTY scraping
+- 基于 SQLite WAL 的持久状态机和租约式防重复机制
+- Runner 断线后仍可继续运行的独立阶段 Worker
+- 支持 AI 显式审查检查点的推理/训练循环
+- local、tmux、SLURM 和 systemd 四种调度后端
+- 产物新鲜度、JSON 字段、文件大小和退出码验证
+- 墙钟时间、阶段次数、失败次数和日志大小预算
+- 幂等事件摄取与保守的至多一次唤醒
+- 官方 `codex queue` 集成，以及 `codex exec resume` 回退路径
+- 明确的终端边界：不模拟键盘，不抓取 PTY
 
-## Quick start
+## 快速开始
 
-### Install as a Codex Skill
+### 安装为 Codex Skill
 
 ```bash
 git clone https://github.com/guxiaofengu-ops/long-horizon-orchestrator.git \
   ~/.codex/skills/long-horizon-orchestrator
 ```
 
-Start a new Codex turn and ask:
+重新开始一个 Codex 对话并输入：
 
 ```text
-Use $long-horizon-orchestrator to run this inference/training pipeline
-with a review checkpoint between phases.
+使用 $long-horizon-orchestrator 运行这个推理/训练 pipeline，
+并在两个阶段之间设置审查检查点。
 ```
 
-### Run the CLI directly
+### 直接运行 CLI
 
 ```bash
 scripts/lho doctor
 cp examples/demo_contract.json ./my-run.json
-# Edit workspace, commands, validators, budgets, and wakeup settings.
+# 编辑 workspace、命令、验证器、预算和唤醒配置。
 scripts/lho validate ./my-run.json
 scripts/lho start ./my-run.json --wait-preflight
 ```
 
-Operator commands:
+常用运维命令：
 
 ```bash
 scripts/lho status RUN_ID
@@ -90,9 +90,9 @@ scripts/lho cancel RUN_ID
 scripts/lho report RUN_ID --json
 ```
 
-## Checkpoints, not polling
+## 检查点，而不是模型轮询
 
-Add `"checkpoint": true` to any phase that requires agent judgment. Once the external command exits successfully and every artifact validator passes, the runner persists `WAITING_FOR_CODEX`, sends one wakeup, and stops. The resumed agent reviews the report before explicitly advancing.
+在需要 AI 判断的阶段添加 `"checkpoint": true`。外部命令成功退出并通过全部产物验证后，Runner 会持久化 `WAITING_FOR_CODEX`，仅发送一次唤醒，然后停止推进。恢复后的 Agent 必须先查看报告，再显式批准下一阶段。
 
 ```json
 {
@@ -106,38 +106,38 @@ Add `"checkpoint": true` to any phase that requires agent judgment. Once the ext
 }
 ```
 
-## Supported wakeup paths
+## 唤醒模式
 
-| Mode | Best for | Behavior |
+| 模式 | 适用场景 | 行为 |
 |---|---|---|
-| `codex_queue` | Managed Codex App/App Server thread | Queues a visible message in the verified thread |
-| `codex_exec` | Persisted CLI session | Resumes context in a new noninteractive process |
-| `command` | Approved integration or tests | Executes an explicit argv template |
-| `none` | Manual operation | Records that an operator must resume |
+| `codex_queue` | 受管理的 Codex App/App Server thread | 向经过验证的原 thread 排入可见消息 |
+| `codex_exec` | 持久化 CLI session | 在新的非交互进程中恢复上下文 |
+| `command` | 已批准的集成或测试 | 执行显式 argv 模板 |
+| `none` | 手动运维 | 记录需要人工恢复 |
 
-An already-open ordinary TUI is not guaranteed to repaint when another process resumes its session. This project does not pretend otherwise; see [the verified support boundary](references/codex-support.md).
+官方并未保证一个已经打开的普通 TUI 会因另一个进程恢复会话而实时重绘。本项目不会把键盘模拟包装成官方能力，详见[已验证的支持边界](references/codex-support.md)。
 
-## Verification
+## 验证
 
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m py_compile scripts/lho_core.py scripts/lho_worker.py
 ```
 
-The acceptance suite covers early preflight, inference → training loops, checkpoints, failure handling, pause/resume, duplicate supervisors/events, and runner-loss recovery. See [TEST_RESULTS.md](TEST_RESULTS.md).
+验收覆盖两步预检、推理 → 训练循环、判断检查点、失败处理、暂停恢复、重复 Supervisor/事件和 Runner 断线恢复。详见 [TEST_RESULTS.md](TEST_RESULTS.md)。
 
-## Security model
+## 安全模型
 
-Commands run with the invoking user's permissions. Prefer argv arrays, keep validators inside the workspace, set finite budgets, and never place credentials in contracts or progress logs. Read [SECURITY.md](SECURITY.md) before production use.
+命令以启动者权限运行。优先使用 argv 数组，将验证路径限制在 workspace 内，设置有限预算，并且不要把凭据放入契约或进度日志。生产使用前请阅读 [SECURITY.md](SECURITY.md)。
 
-## Project status
+## 项目状态
 
-The core runner is usable and tested on macOS with Python 3.13. Scheduler adapters for SLURM and systemd are implemented but require their native commands on the deployment host. Real session delivery depends on the Codex host and verified thread ID.
+核心 Runner 已可使用，并在 macOS + Python 3.13 上完成测试。SLURM 和 systemd 适配器需要部署主机安装相应原生命令。真实会话投递依赖 Codex 宿主和经过验证的 thread ID。
 
-## Contributing
+## 参与贡献
 
-Issues and focused pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+欢迎提交聚焦的问题和 Pull Request。请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
-## License
+## 许可证
 
-MIT © 2026 Gu Xiaofeng. See [LICENSE](LICENSE).
+MIT © 2026 Gu Xiaofeng。详见 [LICENSE](LICENSE)。

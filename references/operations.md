@@ -1,8 +1,8 @@
-# Operations
+# 运维说明
 
-No third-party Python dependency is required.
+不需要第三方 Python 依赖。
 
-For archive/download installations, executable bits may be absent: invoke every command with `python3 scripts/lho ...`. Internal supervisors use the current Python interpreter and do not depend on executable file modes.
+从归档或下载文件安装时，可执行位可能缺失：请使用 `python3 scripts/lho ...` 调用每条命令。内部 Supervisor 使用当前 Python 解释器，不依赖文件的可执行模式。
 
 ```sh
 scripts/lho doctor
@@ -13,10 +13,10 @@ scripts/lho attach RUN_ID
 scripts/lho report RUN_ID --json
 ```
 
-State defaults to `~/.local/state/long-horizon-orchestrator`; override with `LHO_STATE_DIR` or `--state-dir`. Backends: detached `local`, `tmux`, `slurm`, and `systemd`.
+状态默认保存在 `~/.local/state/long-horizon-orchestrator`；可通过 `LHO_STATE_DIR` 或 `--state-dir` 覆盖。支持的后端为独立 `local`、`tmux`、`slurm` 和 `systemd`。
 
-Workers atomically persist results. A replacement supervisor recovers them; a renewable SQLite lease prevents duplicate advancement. Pause finishes the active command then stops. Cancel targets only the recorded process group. Logs/attach never invoke a model.
+Worker 会原子持久化结果。替代 Supervisor 可以恢复结果；可续期的 SQLite 租约会阻止重复推进。`pause` 等待当前命令完成后停止；`cancel` 只针对已记录的进程组。`logs` 和 `attach` 永远不会调用模型。
 
-`codex_exec` waits for an actual `turn.completed` notification before marking a wakeup sent. Stream evidence is stored in `codex-<event>.jsonl`. Optional `wakeup.config` accepts Codex config override strings, and `wakeup.timeout_seconds` bounds a resumed turn (default 300). A failed or unconfirmed turn becomes `dispatch_unknown`; it is never silently reported as successful.
+`codex_exec` 会等待实际的 `turn.completed` 通知，之后才把唤醒标记为已发送。流式证据保存在 `codex-<event>.jsonl`。可选的 `wakeup.config` 接受 Codex 配置覆盖字符串，`wakeup.timeout_seconds` 限制恢复回合的时长（默认 300）。失败或未确认的回合会变成 `dispatch_unknown`，绝不会被静默报告为成功。
 
-If wakeup is `dispatch_unknown`, inspect the thread and use `resume --retry-wakeup` only after confirming non-delivery. Install by copying this folder to `~/.codex/skills/long-horizon-orchestrator`.
+如果唤醒状态为 `dispatch_unknown`，请检查目标 thread，并且仅在确认未投递后使用 `resume --retry-wakeup`。安装时将此目录复制到 `~/.codex/skills/long-horizon-orchestrator`。

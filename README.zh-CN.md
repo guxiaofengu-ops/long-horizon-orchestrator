@@ -1,6 +1,6 @@
 <div align="center">
 
-[English](README.md) | **简体中文**
+[English](README.en.md) | **简体中文（兼容路径；默认入口为 README.md）**
 
 <img src="docs/assets/mark.svg" width="92" alt="Long Horizon Orchestrator 标识">
 
@@ -15,7 +15,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776ab)](https://www.python.org/)
 [![MIT](https://img.shields.io/badge/License-MIT-f59e0b.svg)](LICENSE)
 
-[中文展示页](https://guxiaofengu-ops.github.io/long-horizon-orchestrator/zh/) · [快速开始](#快速开始) · [任务契约](references/zh-CN/task-contract.md) · [运维说明](references/zh-CN/operations.md)
+[中文展示页](https://guxiaofengu-ops.github.io/long-horizon-orchestrator/zh/) · [快速开始](#快速开始) · [任务契约](references/task-contract.md) · [运维说明](references/operations.md)
 
 </div>
 
@@ -115,7 +115,7 @@ scripts/lho report RUN_ID --json
 | `command` | 已批准的集成或测试 | 执行显式 argv 模板 |
 | `none` | 手动运维 | 记录需要人工恢复 |
 
-官方并未保证一个已经打开的普通 TUI 会因另一个进程恢复会话而实时重绘。本项目不会把键盘模拟包装成官方能力，详见[已验证的支持边界](references/zh-CN/codex-support.md)。
+官方并未保证一个已经打开的普通 TUI 会因另一个进程恢复会话而实时重绘。本项目不会把键盘模拟包装成官方能力，详见[已验证的支持边界](references/codex-support.md)。
 
 ## 验证
 
