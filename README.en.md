@@ -141,3 +141,7 @@ Issues and focused pull requests are welcome. Please read [CONTRIBUTING.md](CONT
 ## License
 
 MIT © 2026 Gu Xiaofeng. See [LICENSE](LICENSE).
+
+## Windows
+
+Use `python scripts/lho ...` with the `local` backend. Native Job Objects own each command tree, including descendants, for cancellation, phase timeouts, budget enforcement and worker-loss cleanup. Background processes hide their console windows. The CI matrix includes Windows, Linux and macOS. See [Windows operations](references/windows.md).
