@@ -63,14 +63,20 @@ if WINDOWS:
         check(kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)))
         return str((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
 
+    def active_processes(handle):
+        import struct
+        accounting = ctypes.create_string_buffer(48)
+        check(kernel.QueryInformationJobObject(handle, 1, accounting, len(accounting), None))
+        return struct.unpack_from('<I', accounting.raw, 40)[0]
+
     def terminate_job(handle):
-        check(kernel.TerminateJobObject(handle, 1))
+        if active_processes(handle) == 0:
+            return
+        if not kernel.TerminateJobObject(handle, 1) and active_processes(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
         deadline = time.monotonic() + 5
         while True:
-            import struct
-            accounting = ctypes.create_string_buffer(48)
-            check(kernel.QueryInformationJobObject(handle, 1, accounting, len(accounting), None))
-            if struct.unpack_from('<I', accounting.raw, 40)[0] == 0:
+            if active_processes(handle) == 0:
                 return
             if time.monotonic() >= deadline:
                 raise RuntimeError('owned process job did not drain after termination')
@@ -200,8 +206,12 @@ class Workload:
                     self.process.stdin.write(b"RUN\n")
                     self.process.stdin.close()
                 except BaseException:
-                    self.process.terminate()
-                    self.process.wait(timeout=5)
+                    try:
+                        if self.process.poll() is None:
+                            self.process.terminate()
+                        self.process.wait(timeout=5)
+                    finally:
+                        self.process.stdin.close()
                     raise
             except BaseException:
                 self.close()
