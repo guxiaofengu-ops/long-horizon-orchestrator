@@ -23,7 +23,9 @@ class Tests(unittest.TestCase):
    x=json.loads(self.cli("status",rid).stdout)
    if x["status"] in {"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"} and x["wake_status"] in {'sent','manual_required','dispatch_unknown'}:return x
    time.sleep(.05)
-  self.fail("timeout")
+  supervisor=self.state/'runs'/rid/'supervisor.log'
+  detail=supervisor.read_text(encoding='utf-8',errors='replace')[-6000:] if supervisor.exists() else 'no supervisor log'
+  self.fail(f"timeout; last state={x}; supervisor={detail}")
  def test_preflight_loop_wakeup(self):
   p,w=self.cfg(iters=2);o=self.cli("start",str(p),"--wait-preflight");rid=o.stdout.splitlines()[0];x=self.wait(rid);self.assertEqual((x["status"],x["phase_runs"]),("SUCCEEDED",4));self.assertEqual(w.read_text(),"w\n")
  def test_failure_not_success(self):
