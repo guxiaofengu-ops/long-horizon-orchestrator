@@ -163,6 +163,8 @@ def stop_attempt(c,rid):
         else:
             try:os.killpg(x['worker_pid'],signal.SIGKILL)
             except ProcessLookupError:pass
+            except PermissionError:
+                if alive(x['worker_pid']):raise
     if pid and alive(pid):
         if WINDOWS:raise RuntimeError('owned workload is still live after cancellation')
         try:os.killpg(pid,signal.SIGKILL)

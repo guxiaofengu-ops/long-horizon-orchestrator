@@ -130,6 +130,14 @@ def alive(pid, expected=None):
         finally:
             kernel.CloseHandle(handle)
     try:
+        # Reap an exited direct child before kill(0): on macOS a zombie can
+        # still appear alive while signalling its now-empty group returns EPERM.
+        try:
+            child, _ = os.waitpid(int(pid), os.WNOHANG)
+            if child:
+                return False
+        except ChildProcessError:
+            pass
         os.kill(int(pid), 0)
         return True
     except ProcessLookupError:

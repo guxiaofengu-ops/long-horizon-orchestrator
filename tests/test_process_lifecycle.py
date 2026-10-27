@@ -75,6 +75,14 @@ class ProcessLifecycleTests(unittest.TestCase):
         finally:
             process.terminate();process.wait(timeout=5)
 
+    def test_probe_observes_completed_direct_child(self):
+        process=subprocess.Popen([sys.executable,'-c','pass'])
+        time.sleep(.3)
+        deadline=time.monotonic()+5
+        while alive(process.pid) and time.monotonic()<deadline:time.sleep(.05)
+        self.assertFalse(alive(process.pid))
+        process.wait(timeout=5)
+
     def test_utf8_paths_and_contract(self):
         path,_=self.cfg()
         nested=self.ws/'中文 空格目录';nested.mkdir()

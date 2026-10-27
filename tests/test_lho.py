@@ -10,7 +10,8 @@ class Tests(unittest.TestCase):
   self.assertTrue(self.b.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()))
   for attempt in range(100):
    try:self.t.cleanup();return
-   except PermissionError:
+   except OSError as error:
+    if os.name!='nt' or getattr(error,'winerror',None) not in (5,32,267):raise
     if attempt==99:raise
     time.sleep(.05)
  def cfg(self,fail=False,iters=1):

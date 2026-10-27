@@ -30,8 +30,10 @@
 
 环境：Windows x64、Python 3.12.7、Codex CLI 0.163.0。原始 macOS 记录保持不变。
 
-- 完整单元及子进程验收：23 项通过，33.6 秒；不调用模型，不使用 GPU/NPU。
+- 完整单元及子进程验收：24 项通过，33.0 秒；不调用模型，不使用 GPU/NPU。
 - 新增原生 Job Object：三层进程树取消和阶段超时、Worker 丢失后清理、无关进程存活、PID 创建身份不匹配时拒绝终止、分配失败不放行命令。
 - 后台 Runner 丢失后的恢复、有限墙钟预算、暂停恢复、重复 Supervisor 幂等和中文/空格路径通过。
 - Python 语法及 Skill 结构验证通过；CI 已增加 Windows、Linux、macOS 的 Python 3.10/3.13 矩阵。CI 的真实结果以本次 PR checks 为准。
 - 本机 `codex help queue` 具有 `--thread`/`--message` 参数；上述测试使用确定性的 command 唤醒适配器，未将真实会话投递冒充模型回合完成。
+
+CI 首轮额外发现 macOS 直接子进程已退出但尚未回收时的空进程组 EPERM，以及 Python 3.10 Windows 临时目录清理遇到短暂文件锁的问题；已增加直接子进程回收检测和有界测试清理重试。保留失败日志用于后续跨平台诊断，不屏蔽活进程的权限失败。
