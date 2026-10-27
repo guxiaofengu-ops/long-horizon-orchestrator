@@ -172,7 +172,9 @@ def stop_attempt(c,rid):
     c.execute("UPDATE attempts SET status='CANCELLED',finished=? WHERE id=? AND status='RUNNING'",(ts(),a['id']));c.execute("UPDATE runs SET worker_pid=NULL WHERE id=?",(rid,));c.commit()
 def finish(c,root,x,status,detail):
     if status in {'CANCELLED','BUDGET_EXCEEDED'}:stop_attempt(c,x['id'])
-    c.execute("UPDATE runs SET status=?,wake_status='pending',finished=?,updated=?,last_error=? WHERE id=?",(status,ts(),ts(),None if status=="SUCCEEDED" else detail,x["id"]));c.commit();key="terminal:"+status.lower();event(c,x["id"],key,"terminal",{"status":status,"detail":detail});wake(c,root,x["id"],key,status,detail)
+    changed=c.execute("UPDATE runs SET status=?,wake_status='pending',finished=?,updated=?,last_error=? WHERE id=? AND status NOT IN ('SUCCEEDED','FAILED','CANCELLED','BUDGET_EXCEEDED')",(status,ts(),ts(),None if status=="SUCCEEDED" else detail,x["id"])).rowcount;c.commit()
+    if not changed:return
+    key="terminal:"+status.lower();event(c,x["id"],key,"terminal",{"status":status,"detail":detail});wake(c,root,x["id"],key,status,detail)
 def supervise(root,rid):
     try:return _supervise(root,rid)
     finally:

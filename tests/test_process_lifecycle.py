@@ -54,7 +54,9 @@ class ProcessLifecycleTests(unittest.TestCase):
         self.assertEqual(self.wait(run)['status'],'FAILED')
         self.assertTrue(all(not alive(pid) for pid in pids))
         report=json.loads(self.cli('report',run,'--json').stdout)
-        self.assertTrue(json.loads(report['attempts'][0]['result'])['timed_out'])
+        result=json.loads(report['attempts'][0]['result'])
+        self.assertIn('timed_out',result,result)
+        self.assertTrue(result['timed_out'],result)
 
     @unittest.skipUnless(WINDOWS,'Windows Job Object worker-loss semantics')
     def test_worker_loss_closes_job_and_cleans_descendants(self):

@@ -15,6 +15,23 @@ class RegressionTests(unittest.TestCase):
     cfg = test_lho.Tests.cfg
     cli = test_lho.Tests.cli
     wait = test_lho.Tests.wait
+
+    def test_stale_finalizer_cannot_reset_a_sent_terminal_wakeup(self):
+        import lho_core as core
+        from unittest.mock import patch
+        path,wake=self.cfg();cfg=core.contract(path)
+        self.state.mkdir();(self.state/'runs'/'finalizer-race').mkdir(parents=True)
+        with closing(core.connect(self.state)) as db:
+            now=time.time()
+            db.execute("INSERT INTO runs(id,name,status,contract,created,updated,started) VALUES(?,?,'RUNNING',?,?,?,?)",
+                       ('finalizer-race','race',json.dumps(cfg),now,now,now));db.commit()
+            stale=core.row(db,'finalizer-race')
+            with patch.object(core,'stop_attempt'):
+                core.finish(db,self.state,stale,'CANCELLED','first finalizer')
+                self.assertEqual(core.row(db,'finalizer-race')['wake_status'],'sent')
+                core.finish(db,self.state,stale,'CANCELLED','stale second finalizer')
+            self.assertEqual(core.row(db,'finalizer-race')['wake_status'],'sent')
+            self.assertEqual(wake.read_text(),'w\n')
     def configure(self, duration=1, phase_limit=1):
         path, wake = self.cfg()
         cfg = json.loads(path.read_text())
