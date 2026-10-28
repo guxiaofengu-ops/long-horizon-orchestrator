@@ -108,9 +108,12 @@ class WakeupRecoveryTests(unittest.TestCase):
         rid, _ = self.seed()
         barrier = threading.Barrier(2)
         replace = core.os.replace
+        started = threading.local()
 
         def synchronized_replace(source, target):
-            barrier.wait(timeout=5)
+            if not getattr(started, 'waited', False):
+                started.waited = True
+                barrier.wait(timeout=5)
             return replace(source, target)
 
         def reader():
@@ -121,6 +124,26 @@ class WakeupRecoveryTests(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=2) as pool:
                 results = list(pool.map(lambda _: reader(), range(2)))
         self.assertTrue(all(result['id'] == rid for result in results))
+        self.assertEqual(json.loads((self.state / 'runs' / rid / 'report.json').read_text())['id'], rid)
+
+    def test_report_retries_transient_windows_sharing_violation(self):
+        rid, _ = self.seed()
+        replace = core.os.replace
+        failure = PermissionError('temporary target sharing conflict')
+        failure.winerror = 5
+        first = True
+
+        def transient_replace(source, target):
+            nonlocal first
+            if first:
+                first = False
+                raise failure
+            return replace(source, target)
+
+        with closing(core.connect(self.state)) as db:
+            with patch.object(core, 'WINDOWS', True), patch.object(core.os, 'replace', side_effect=transient_replace):
+                self.assertEqual(core.report(db, self.state, rid)['id'], rid)
+        self.assertFalse(first)
         self.assertEqual(json.loads((self.state / 'runs' / rid / 'report.json').read_text())['id'], rid)
 
     def test_resume_restarts_lost_supervisor_without_restarting_worker(self):

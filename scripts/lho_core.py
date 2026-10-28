@@ -112,7 +112,13 @@ def report(c,root,rid):
         tmp=Path(out.name)
         try:json.dump(x,out,indent=2,sort_keys=True)
         except BaseException:out.close();tmp.unlink(missing_ok=True);raise
-    try:os.replace(tmp,p)
+    try:
+        deadline=time.monotonic()+2
+        while True:
+            try:os.replace(tmp,p);break
+            except PermissionError as error:
+                if not WINDOWS or getattr(error,'winerror',None) not in (5,32) or time.monotonic()>=deadline:raise
+                time.sleep(.02)
     finally:tmp.unlink(missing_ok=True)
     return x
 def wake_key(x):

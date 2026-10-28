@@ -55,3 +55,5 @@ CI 首轮额外发现 macOS 直接子进程已退出但尚未回收时的空进�
 恢复使用原有 SQLite 状态和 attempt，不重跑已完成阶段、不重置预算。未知投递不自动重试；显式重试保留诊断事件。生产使用仍需独立服务或 Watchdog 恢复失效的 Supervisor，详见 [Linux 唤醒排查](references/linux-recovery.md)。
 
 本次未读取用户服务器上 `4186c5b1-a171-440d-afd5-28a5c0008604` 的实时证据：本机已配置的 SSH 入口 A/B 均返回 `Permission denied (publickey,password)`。因此这里不将已复现的通用缺陷宣称为该运行已证实的根因，也不声称完成了该服务器上的更新、真实 Codex 唤醒或 DGM4 benchmark 验证。
+
+远程 CI 首轮的 Linux/macOS 四组和 Windows/Python 3.13 通过；Windows/Python 3.10 在并发替换报告时发现短暂的 `WinError 5`。补充仅针对 Windows 错误码 5/32、最长两秒的报告替换重试，以及确定性的短暂文件锁回归；不会重试缺失源文件或无限等待权限恢复。最终测试数量为 36 项，跨平台结果以对应提交的 CI checks 为准。
