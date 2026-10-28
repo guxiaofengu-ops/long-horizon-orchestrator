@@ -22,3 +22,5 @@ Worker 会原子持久化结果。替代 Supervisor 可以恢复结果；可续�
 如果唤醒状态为 `dispatch_unknown`，请检查目标 thread，并且仅在确认未投递后使用 `resume --retry-wakeup`。安装时将此目录复制到 `~/.codex/skills/long-horizon-orchestrator`。
 
 Windows 使用 `python scripts/lho ...`，原生进程树管理和恢复边界详见 [Windows 运行说明](windows.md)。
+
+Linux 上长时间没有触发时，应同时检查 Supervisor 租约、检查点/终态唤醒记录和实际命令进度。具体恢复步骤与无人值守边界见 [Linux 唤醒排查](linux-recovery.md)。

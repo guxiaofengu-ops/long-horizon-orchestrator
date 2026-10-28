@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse,json,os,shutil,signal,sqlite3,subprocess,sys,time,uuid,shlex
+import argparse,json,os,shutil,signal,sqlite3,subprocess,sys,time,uuid,shlex,tempfile
 from pathlib import Path
 from lho_process import WINDOWS,alive,detached_options,identity,stop_named_job,stop_worker
 TERMINAL={"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"}
@@ -106,14 +106,51 @@ def start_attempt(c,root,x,cfg,phase,n):
     c.execute("UPDATE runs SET status='RUNNING',worker_pid=?,phase_runs=phase_runs+1,updated=? WHERE id=?",(proc.pid,ts(),x["id"]));c.commit();event(c,x["id"],"start:"+tag,"phase_started",{"phase":phase["name"],"attempt":n})
 def report(c,root,rid):
     x=dict(row(c,rid));x["contract"]=json.loads(x.pop("contract"));x["attempts"]=[dict(a) for a in c.execute("SELECT * FROM attempts WHERE run_id=? ORDER BY id",(rid,))];x["events"]=[dict(a) for a in c.execute("SELECT * FROM events WHERE run_id=? ORDER BY id",(rid,))];x["wakeups"]=[dict(a) for a in c.execute("SELECT * FROM wakeups WHERE run_id=?",(rid,))]
-    p=rdir(root,rid)/"report.json";tmp=p.with_suffix(".tmp");tmp.write_text(json.dumps(x,indent=2,sort_keys=True));os.replace(tmp,p);return x
+    p=rdir(root,rid)/"report.json"
+    # A resumed agent may read a report while the dispatcher writes another.
+    with tempfile.NamedTemporaryFile(mode="w",encoding="utf-8",dir=p.parent,prefix="report-",suffix=".tmp",delete=False) as out:
+        tmp=Path(out.name)
+        try:json.dump(x,out,indent=2,sort_keys=True)
+        except BaseException:out.close();tmp.unlink(missing_ok=True);raise
+    try:os.replace(tmp,p)
+    finally:tmp.unlink(missing_ok=True)
+    return x
+def wake_key(x):
+    if x['status'] in TERMINAL:return 'terminal:'+x['status'].lower()
+    if x['status']=='WAITING_FOR_CODEX':return f"checkpoint:{x['iteration']}:{x['phase_index']}"
+    return None
+def wake_result(c,rid,key,status,detail):
+    c.execute("UPDATE wakeups SET status=?,updated=?,detail=? WHERE run_id=? AND event_key=?",(status,ts(),detail,rid,key))
+    # Old checkpoint failures must not overwrite a newer terminal delivery either.
+    c.execute("UPDATE runs SET wake_status=? WHERE id=? AND ?=CASE WHEN status IN ('SUCCEEDED','FAILED','CANCELLED','BUDGET_EXCEEDED') THEN 'terminal:'||lower(status) WHEN status='WAITING_FOR_CODEX' THEN 'checkpoint:'||iteration||':'||phase_index END",(status,rid,key))
+    c.commit()
+def recover_wakeup(c,root,x):
+    key=wake_key(x)
+    if not key:return
+    previous=c.execute("SELECT * FROM wakeups WHERE run_id=? AND event_key=?",(x['id'],key)).fetchone()
+    if previous and previous['status']=='dispatching':
+        w=json.loads(x['contract'])['wakeup']
+        timeout=float(w.get('timeout_seconds',300)) if w.get('mode')=='codex_exec' else 60
+        # No replay after an interrupted external side effect. Allow DB/report grace.
+        if ts()-previous['updated']>timeout+60:
+            wake_result(c,x['id'],key,'dispatch_unknown','dispatcher interrupted or exceeded delivery deadline; inspect delivery evidence before resume --retry-wakeup')
+        return
+    if previous and previous['status']!='pending':
+        if x['wake_status']!=previous['status']:wake_result(c,x['id'],key,previous['status'],previous['detail'])
+        return
+    if previous or x['wake_status']=='pending':
+        status='CHECKPOINT' if x['status']=='WAITING_FOR_CODEX' else x['status']
+        wake(c,root,x['id'],key,status,x['last_error'] or 'recovered persisted event')
 def wake(c,root,rid,key,status,detail):
     cfg=json.loads(row(c,rid)["contract"]);w=cfg["wakeup"]
-    try:c.execute("INSERT INTO wakeups VALUES(?,?,?, ?,?,?)",(rid,key,"dispatching",ts(),ts(),None));c.commit()
-    except sqlite3.IntegrityError:return
+    c.execute("INSERT OR IGNORE INTO wakeups VALUES(?,?,?,?,?,?)",(rid,key,"pending",ts(),ts(),None))
+    claimed=c.execute("UPDATE wakeups SET status='dispatching',updated=? WHERE run_id=? AND event_key=? AND status='pending'",(ts(),rid,key)).rowcount
+    c.commit()
+    if not claimed:return
     c.execute("UPDATE runs SET wake_status='dispatching' WHERE id=?",(rid,));c.commit()
-    report(c,root,rid); rp=str(rdir(root,rid)/"report.json"); msg=f"Long-horizon run {rid} reached {status}: {detail}. Read {rp}, verify evidence and budgets, then decide whether another bounded run is needed."
+    rp=str(rdir(root,rid)/"report.json"); msg=f"Long-horizon run {rid} reached {status}: {detail}. Read {rp}, verify evidence and budgets, then decide whether another bounded run is needed."
     try:
+        report(c,root,rid)
         mode=w.get("mode","none")
         if mode=="none": final="manual_required"; info=msg
         elif mode=="codex_queue":subprocess.run([w.get("codex_bin","codex"),"queue","--thread",w["thread_id"],"--message",msg],check=True,capture_output=True,timeout=60);final="sent";info=None
@@ -136,17 +173,18 @@ def wake(c,root,rid,key,status,detail):
                 for old,new in vals.items():a=a.replace(old,new)
                 cmd.append(a)
             subprocess.run(cmd,check=True,timeout=60);final="sent";info=None
-        c.execute("UPDATE wakeups SET status=?,updated=?,detail=? WHERE run_id=? AND event_key=?",(final,ts(),info,rid,key))
-        # An older checkpoint may complete after the next terminal dispatch starts.
-        c.execute("UPDATE runs SET wake_status=? WHERE id=? AND (? LIKE 'terminal:%' OR status NOT IN ('SUCCEEDED','FAILED','CANCELLED','BUDGET_EXCEEDED')) AND NOT EXISTS (SELECT 1 FROM wakeups newer JOIN wakeups current ON current.run_id=newer.run_id WHERE current.run_id=? AND current.event_key=? AND newer.created>current.created)",(final,rid,key,rid,key));c.commit();report(c,root,rid)
-    except BaseException as e:c.execute("UPDATE wakeups SET status='dispatch_unknown',updated=?,detail=? WHERE run_id=? AND event_key=?",(ts(),str(e),rid,key));c.execute("UPDATE runs SET wake_status='dispatch_unknown' WHERE id=?",(rid,));c.commit();report(c,root,rid)
+        wake_result(c,rid,key,final,info)
+    except BaseException as e:wake_result(c,rid,key,'dispatch_unknown',f'{type(e).__name__}: {e}')
+    # A report write failure must not undo confirmed delivery or hide DB diagnostics.
+    try:report(c,root,rid)
+    except OSError as e:print(f"report write failed for {rid}: {e}",file=sys.stderr,flush=True)
 def stop_attempt(c,rid):
     x=row(c,rid);a=c.execute("SELECT * FROM attempts WHERE run_id=? AND status='RUNNING' ORDER BY id DESC LIMIT 1",(rid,)).fetchone()
     if not a:return
     try:pid=int(Path(a['pid_path']).read_text(encoding="utf-8"))
     except (OSError,ValueError):pid=None
     spec=json.loads(Path(a['spec_path']).read_text(encoding='utf-8'))
-    Path(spec['cancel_path']).touch()
+    Path(spec.get('cancel_path',str(a['spec_path'])+'.cancel')).touch()
     if WINDOWS:stop_named_job(spec['windows_job_name'])
     else:
         for target in (pid,x['worker_pid']):
@@ -188,11 +226,11 @@ def _supervise(root,rid):
     while True:
         x=row(c,rid);cfg=json.loads(x["contract"]);b=cfg["budget"]
         if x["status"] in TERMINAL:
-            if x['wake_status']=='pending':wake(c,root,rid,'terminal:'+x['status'].lower(),x['status'],x['last_error'] or 'recovered terminal event')
+            recover_wakeup(c,root,x)
             return 0
-        if x['status']=='WAITING_FOR_CODEX':return 0
         if x["cancel_requested"]:
             finish(c,root,x,"CANCELLED","operator cancellation");return 0
+        if x['status']=='WAITING_FOR_CODEX':recover_wakeup(c,root,x);return 0
         log=rdir(root,rid)/"run.log"
         if ts()-x["started"]>int(b["max_wall_seconds"]) or (log.exists() and log.stat().st_size>int(b["max_log_bytes"])):finish(c,root,x,"BUDGET_EXCEEDED","run budget exhausted");return 0
         phase=cfg["phases"][x["phase_index"]];a=c.execute("SELECT * FROM attempts WHERE run_id=? AND iteration=? AND phase_index=? ORDER BY attempt DESC LIMIT 1",(rid,x["iteration"],x["phase_index"])).fetchone()
@@ -227,7 +265,7 @@ def _supervise(root,rid):
             time.sleep(.5);continue
         if x['phase_runs']>=int(b['max_phase_runs']):finish(c,root,x,'BUDGET_EXCEEDED','phase-run budget exhausted before next launch');return 0
         n=c.execute("SELECT COALESCE(MAX(attempt),0)+1 FROM attempts WHERE run_id=? AND iteration=? AND phase_index=?",(rid,x["iteration"],x["phase_index"])).fetchone()[0];start_attempt(c,root,x,cfg,phase,n);lease(c,rid,owner)
-def public(x):return {k:x[k] for k in ("id","name","status","iteration","phase_index","phase_runs","failures","preflight_seen","preflight_passed","backend","scheduler_id","worker_pid","last_error","wake_status")}
+def public(x):return {k:x[k] for k in ("id","name","status","iteration","phase_index","phase_runs","failures","preflight_seen","preflight_passed","backend","scheduler_id","worker_pid","last_error","wake_status","started","updated","lease_owner","lease_until")}
 def main(argv=None):
     p=argparse.ArgumentParser(prog="lho");p.add_argument("--state-dir");s=p.add_subparsers(dest="cmd",required=True)
     q=s.add_parser("validate");q.add_argument("contract")
@@ -265,10 +303,19 @@ def main(argv=None):
     if a.cmd=="cancel":
         c.execute("UPDATE runs SET cancel_requested=1,lease_until=NULL,updated=? WHERE id=?",(ts(),a.run_id));c.commit()
         attempt=c.execute("SELECT spec_path FROM attempts WHERE run_id=? AND status='RUNNING' ORDER BY id DESC LIMIT 1",(a.run_id,)).fetchone()
-        if attempt:Path(json.loads(Path(attempt['spec_path']).read_text(encoding='utf-8'))['cancel_path']).touch()
+        if attempt:
+            spec=json.loads(Path(attempt['spec_path']).read_text(encoding='utf-8'))
+            Path(spec.get('cancel_path',str(attempt['spec_path'])+'.cancel')).touch()
         launch(root,a.run_id,"local");print("cancel requested");return 0
     if a.cmd=="resume":
-        if a.retry_wakeup and x["wake_status"]=="dispatch_unknown":c.execute("DELETE FROM wakeups WHERE run_id=? AND status='dispatch_unknown'",(a.run_id,));c.execute("UPDATE runs SET wake_status='pending' WHERE id=?",(a.run_id,));c.commit();wake(c,root,a.run_id,f"manual:{int(ts())}",x["status"],x["last_error"] or "manual retry")
+        if a.retry_wakeup:
+            key=wake_key(x)
+            if not key:raise SystemExit('no checkpoint or terminal notification to retry')
+            recover_wakeup(c,root,x);x=row(c,a.run_id)
+            if x['wake_status']!='dispatch_unknown':raise SystemExit('wakeup is not dispatch_unknown; inspect report before retrying')
+            event(c,a.run_id,'wakeup-retry:'+uuid.uuid4().hex,'wakeup_retry',{'event_key':key,'previous':[dict(w) for w in c.execute('SELECT * FROM wakeups WHERE run_id=? AND event_key=?',(a.run_id,key))]})
+            c.execute("UPDATE wakeups SET status='pending',updated=? WHERE run_id=? AND event_key=? AND status='dispatch_unknown'",(ts(),a.run_id,key));c.commit()
+            wake(c,root,a.run_id,key,'CHECKPOINT' if x['status']=='WAITING_FOR_CODEX' else x['status'],x['last_error'] or 'manual retry')
         elif x["status"]=="WAITING_FOR_CODEX":
             if not a.approve_checkpoint:raise SystemExit("checkpoint requires --approve-checkpoint after reviewing the report")
             cfg=json.loads(x["contract"])
@@ -276,6 +323,11 @@ def main(argv=None):
             else:c.execute("UPDATE runs SET iteration=iteration+1,phase_index=0,preflight_seen=0,status='RUNNING',lease_until=NULL,wake_status='pending',updated=? WHERE id=?",(ts(),a.run_id))
             c.commit();launch(root,a.run_id,x["backend"] or "local")
         elif x["status"]=="PAUSED" or x["pause_requested"]:c.execute("UPDATE runs SET pause_requested=0,status='RUNNING',lease_until=NULL,updated=? WHERE id=?",(ts(),a.run_id));c.commit();launch(root,a.run_id,x["backend"] or "local")
+        elif (x['lease_until'] or 0)<ts():
+            sid=launch(root,a.run_id,x['backend'] or 'local')
+            c.execute('UPDATE runs SET scheduler_id=? WHERE id=?',(sid,a.run_id));c.commit()
+            print('supervisor restarted; existing attempt and budgets preserved');return 0
+        else:print('supervisor lease is active; no duplicate launched');return 0
         print("resumed");return 0
     if a.cmd=="report":
         d=report(c,root,a.run_id)
@@ -290,7 +342,7 @@ def main(argv=None):
             if path.exists():
                 with open(path,encoding="utf-8",errors="replace") as f:f.seek(pos);z=f.read();pos=f.tell()
                 if z:print(z,end="",flush=True)
-            if x["status"] in TERMINAL or x["status"]=="PAUSED":print(json.dumps(public(x)));break
+            if x["status"] in TERMINAL or x["status"] in {"PAUSED","WAITING_FOR_CODEX"}:print(json.dumps(public(x)));break
             time.sleep(.25)
         return 0
 if __name__=="__main__":raise SystemExit(main())

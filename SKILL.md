@@ -15,6 +15,8 @@ description: Run durable inference/training or other long pipelines outside the 
 
 使用 `status`、`logs`、`attach`、`pause`、`resume`、`cancel` 和 `report`。阅读 [operations.md](references/operations.md)。无人值守恢复需要持久 Supervisor 服务或独立 Watchdog；仅有独立本地进程并不等于操作系统重启服务。
 
+Linux 上长时间没有唤醒时，阅读 [linux-recovery.md](references/linux-recovery.md)，区分命令仍在运行、Supervisor 租约过期、检查点尚未投递和投递结果不明。用 `resume RUN_ID` 恢复租约已过期的运行，用 `supervise RUN_ID` 恢复待发送检查点或终态通知；不要因等待时间长而创建重复任务。
+
 Windows 使用 `python scripts/lho ...` 和 `local` 后端；后台进程隐藏控制台，命令及其后代通过原生 Job Object 管理。部署前验证取消、阶段超时、墙钟预算和 Worker 意外退出，具体操作见 [Windows 运行说明](references/windows.md)。设备占用检查及远端清理由任务自身的执行器负责。
 
 ## 边界

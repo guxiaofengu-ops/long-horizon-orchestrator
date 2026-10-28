@@ -39,3 +39,19 @@
 CI 首轮额外发现 macOS 直接子进程已退出但尚未回收时的空进程组 EPERM，以及 Python 3.10 Windows 临时目录清理遇到短暂文件锁的问题；已增加直接子进程回收检测和有界测试清理重试。保留失败日志用于后续跨平台诊断，不屏蔽活进程的权限失败。
 
 并发取消补充终态 CAS，避免旧 Supervisor 在同一终态已完成通知后把 wake_status 重置为 pending；新增有确定性覆盖的终态重复裁定测试。
+
+## Linux 唤醒与恢复修复 — 2026-10-28
+
+以 `2989a0c` 为基线，在隔离的 Linux/Python 3.10 容器中执行新增的首批 9 项故障回归：5 项断言失败、3 项异常、1 项通过。证实以下恢复缺陷存在；这些复现不依赖 DGM4 数据集或模型调用：
+
+- 已持久化 `WAITING_FOR_CODEX`、但尚未发送的检查点，在重启 Supervisor 后被直接跳过。
+- 中断的 `dispatching` 记录不会转为可诊断的 `dispatch_unknown`。
+- Supervisor 丢失、租约过期的 `RUNNING` 任务，执行 `resume` 只打印成功而不重新启动 Supervisor。
+- 并发报告共用 `report.tmp`，会因另一写入方已移动文件而抛出 `FileNotFoundError`。唤醒前报告失败又位于异常处理范围之外，导致状态遗留为 `dispatching`。
+- 唤醒后的报告写入失败会撤销已确认的投递状态；旧检查点失败会覆盖更新的终态投递；等待检查点时的取消请求会被忽略。
+
+修复后，在 Linux/Python 3.10 容器与 macOS/Python 3.13 各运行完整 35 项测试：32 项通过、3 项 Windows 专用测试按平台跳过。新增 10 项回归全部通过，另覆盖旧版 Linux attempt 缺少 `cancel_path` 时仍可取消。Python 编译、Skill 结构验证和差异格式检查通过。
+
+恢复使用原有 SQLite 状态和 attempt，不重跑已完成阶段、不重置预算。未知投递不自动重试；显式重试保留诊断事件。生产使用仍需独立服务或 Watchdog 恢复失效的 Supervisor，详见 [Linux 唤醒排查](references/linux-recovery.md)。
+
+本次未读取用户服务器上 `4186c5b1-a171-440d-afd5-28a5c0008604` 的实时证据：本机已配置的 SSH 入口 A/B 均返回 `Permission denied (publickey,password)`。因此这里不将已复现的通用缺陷宣称为该运行已证实的根因，也不声称完成了该服务器上的更新、真实 Codex 唤醒或 DGM4 benchmark 验证。
