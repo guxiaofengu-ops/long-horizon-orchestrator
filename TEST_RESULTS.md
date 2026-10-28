@@ -54,6 +54,13 @@ CI 首轮额外发现 macOS 直接子进程已退出但尚未回收时的空进�
 
 恢复使用原有 SQLite 状态和 attempt，不重跑已完成阶段、不重置预算。未知投递不自动重试；显式重试保留诊断事件。生产使用仍需独立服务或 Watchdog 恢复失效的 Supervisor，详见 [Linux 唤醒排查](references/linux-recovery.md)。
 
-本次未读取用户服务器上 `4186c5b1-a171-440d-afd5-28a5c0008604` 的实时证据：本机已配置的 SSH 入口 A/B 均返回 `Permission denied (publickey,password)`。因此这里不将已复现的通用缺陷宣称为该运行已证实的根因，也不声称完成了该服务器上的更新、真实 Codex 唤醒或 DGM4 benchmark 验证。
+首轮修复时，SSH 入口返回 `Permission denied (publickey,password)`，因此当时只完成通用缺陷复现，没有将其宣称为生产运行的根因。收到可用访问方式后的现场结论见下节。
 
 远程 CI 首轮的 Linux/macOS 四组和 Windows/Python 3.13 通过；Windows/Python 3.10 在并发替换报告时发现短暂的 `WinError 5`。补充仅针对 Windows 错误码 5/32、最长两秒的报告替换重试，以及确定性的短暂文件锁回归；不会重试缺失源文件或无限等待权限恢复。最终测试数量为 36 项，跨平台结果以对应提交的 CI checks 为准。
+
+## 两台 Linux 主机的现场配置核查 — 2026-10-28
+
+- CLI 0.164.0 主机：长训练结束后，验证阶段因执行环境缺少 `safetensors` 失败。契约明确配置为 `wakeup.mode: "none"`，所以状态为 `manual_required`，从未尝试自动通知。后续替代运行健康，但继承了同样的无唤醒配置。该问题与 Supervisor 恢复缺陷不同。
+- CLI 0.155.1 主机：本地评估运行到 15:19，随后 AMD 因缺少 `flash_attn` 失败并成功入队。原会话当时仍在工作；队列消息于 15:55 进入会话，随后产生失败核验回复。因此不能把这一情况称为通知完全丢失。修复环境后的替代评估仍在运行，尚未到达最终通知条件。
+- 新增 `start --require-wakeup`，防止自动恢复需求静默退化为 `none`；兼容的手动运行会明确警告。新增 `configure-wakeup` 为非终态运行配置未来通知，保留 Worker、预算与投递历史。`codex_queue` 新投递使用 `queued`，明确区分入队成功和模型回合完成。
+- 增加 5 项配置回归。macOS/Python 3.13 与 Linux/Python 3.10 容器完整 41 项测试通过，3 项 Windows 专用测试跳过；Skill 结构与语法检查通过。这些测试不调用模型；真实队列消费结论来自上述主机的原始会话记录。

@@ -8,3 +8,5 @@
 - https://developers.openai.com/blog/codex-as-a-platform
 
 CLI 支持会发生变化，因此请在部署主机上运行 `scripts/lho doctor`。
+
+2026-10-28 在 Linux CLI 0.155.1 的实际会话中，任务失败时原回合仍在执行，`codex queue` 入队的失败通知到原回合结束后才被消费。项目因此将新队列投递记为 `queued`，不再用 `sent` 暗示模型回合已经执行。CLI 0.164.0 主机上发现另一任务配置为 `none`，失败时只生成 `manual_required`；这与队列消费延迟是两个不同问题。自动任务应显式使用 `--require-wakeup`，并为无人值守运行核实宿主是否持续消费队列。

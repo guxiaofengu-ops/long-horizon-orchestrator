@@ -9,3 +9,5 @@ JSON 必须包含 `schema_version: 1`、`name`、指向已有目录的绝对路�
 每一轮都按顺序运行各阶段。成功的迭代在达到 `max_iterations`，或可选的 `loop.stop_file` 存在时结束。
 
 唤醒模式包括 `codex_queue` 和 `codex_exec`（两者都需要经过验证的 `thread_id`）、`command`（argv 可包含 `{run_id}`、`{event}`、`{report}`、`{message}`）以及 `none`。参见 `examples/demo_contract.json`。绝不猜测 thread ID。
+
+自动恢复需求使用 `start CONTRACT --require-wakeup`，避免默认的 `none` 被误认为已配置通知。队列模式的完成状态为 `queued`，表示入队成功；模型回合是否实际完成需要另外的宿主证据。原回合活跃时，排队等待不等于通知丢失。

@@ -22,7 +22,7 @@ class Tests(unittest.TestCase):
  def wait(self,rid):
   for _ in range(200):
    x=json.loads(self.cli("status",rid).stdout)
-   if x["status"] in {"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"} and x["wake_status"] in {'sent','manual_required','dispatch_unknown'}:return x
+   if x["status"] in {"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"} and x["wake_status"] in {'sent','queued','manual_required','dispatch_unknown'}:return x
    time.sleep(.05)
   supervisor=self.state/'runs'/rid/'supervisor.log'
   detail=supervisor.read_text(encoding='utf-8',errors='replace')[-6000:] if supervisor.exists() else 'no supervisor log'

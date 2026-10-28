@@ -21,6 +21,16 @@ Worker 会原子持久化结果。替代 Supervisor 可以恢复结果；可续�
 
 如果唤醒状态为 `dispatch_unknown`，请检查目标 thread，并且仅在确认未投递后使用 `resume --retry-wakeup`。安装时将此目录复制到 `~/.codex/skills/long-horizon-orchestrator`。
 
+自动恢复任务使用 `start CONTRACT --require-wakeup --wait-preflight`。该选项会在启动前拒绝 `wakeup.mode: "none"`；兼容的手动启动方式仍可使用 `none`，但会在 stderr 明确警告不会自动通知。`codex_queue` 成功时记录为 `queued`，只有队列接收得到确认；原回合繁忙或宿主未消费队列时，不代表模型已开始执行。`codex_exec` 的 `sent` 则要求完整回合证据。
+
+为尚未结束的运行修正未来通知配置，可使用：
+
+```sh
+python3 scripts/lho configure-wakeup RUN_ID --mode codex_queue --thread-id VERIFIED_THREAD_ID --codex-bin /absolute/path/to/codex
+```
+
+这会同步持久契约和配置事件，不重启 Worker、不重置预算、不发送测试消息，也不改写既有投递记录。thread ID 必须事先通过可信宿主上下文或该会话的 `session_meta` 核实；终态运行不能用此命令重新配置。已加载旧脚本的 Supervisor 需要单独重启才能使用新的状态报告语义。
+
 Windows 使用 `python scripts/lho ...`，原生进程树管理和恢复边界详见 [Windows 运行说明](windows.md)。
 
 Linux 上长时间没有触发时，应同时检查 Supervisor 租约、检查点/终态唤醒记录和实际命令进度。具体恢复步骤与无人值守边界见 [Linux 唤醒排查](linux-recovery.md)。

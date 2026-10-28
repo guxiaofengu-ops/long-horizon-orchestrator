@@ -104,13 +104,11 @@ def start_attempt(c,root,x,cfg,phase,n):
     Path(str(sp)+'.worker.json').write_text(json.dumps(identity(proc.pid)))
     c.execute("INSERT INTO attempts(run_id,iteration,phase_index,phase_name,attempt,status,started,spec_path,result_path,pid_path) VALUES(?,?,?,?,?,'RUNNING',?,?,?,?)",(x["id"],x["iteration"],x["phase_index"],phase["name"],n,ts(),str(sp),str(rp),str(pp)))
     c.execute("UPDATE runs SET status='RUNNING',worker_pid=?,phase_runs=phase_runs+1,updated=? WHERE id=?",(proc.pid,ts(),x["id"]));c.commit();event(c,x["id"],"start:"+tag,"phase_started",{"phase":phase["name"],"attempt":n})
-def report(c,root,rid):
-    x=dict(row(c,rid));x["contract"]=json.loads(x.pop("contract"));x["attempts"]=[dict(a) for a in c.execute("SELECT * FROM attempts WHERE run_id=? ORDER BY id",(rid,))];x["events"]=[dict(a) for a in c.execute("SELECT * FROM events WHERE run_id=? ORDER BY id",(rid,))];x["wakeups"]=[dict(a) for a in c.execute("SELECT * FROM wakeups WHERE run_id=?",(rid,))]
-    p=rdir(root,rid)/"report.json"
+def atomic_json(p,value):
     # A resumed agent may read a report while the dispatcher writes another.
     with tempfile.NamedTemporaryFile(mode="w",encoding="utf-8",dir=p.parent,prefix="report-",suffix=".tmp",delete=False) as out:
         tmp=Path(out.name)
-        try:json.dump(x,out,indent=2,sort_keys=True)
+        try:json.dump(value,out,indent=2,sort_keys=True)
         except BaseException:out.close();tmp.unlink(missing_ok=True);raise
     try:
         deadline=time.monotonic()+2
@@ -120,6 +118,9 @@ def report(c,root,rid):
                 if not WINDOWS or getattr(error,'winerror',None) not in (5,32) or time.monotonic()>=deadline:raise
                 time.sleep(.02)
     finally:tmp.unlink(missing_ok=True)
+def report(c,root,rid):
+    x=dict(row(c,rid));x["contract"]=json.loads(x.pop("contract"));x["attempts"]=[dict(a) for a in c.execute("SELECT * FROM attempts WHERE run_id=? ORDER BY id",(rid,))];x["events"]=[dict(a) for a in c.execute("SELECT * FROM events WHERE run_id=? ORDER BY id",(rid,))];x["wakeups"]=[dict(a) for a in c.execute("SELECT * FROM wakeups WHERE run_id=?",(rid,))]
+    atomic_json(rdir(root,rid)/"report.json",x)
     return x
 def wake_key(x):
     if x['status'] in TERMINAL:return 'terminal:'+x['status'].lower()
@@ -159,7 +160,7 @@ def wake(c,root,rid,key,status,detail):
         report(c,root,rid)
         mode=w.get("mode","none")
         if mode=="none": final="manual_required"; info=msg
-        elif mode=="codex_queue":subprocess.run([w.get("codex_bin","codex"),"queue","--thread",w["thread_id"],"--message",msg],check=True,capture_output=True,timeout=60);final="sent";info=None
+        elif mode=="codex_queue":subprocess.run([w.get("codex_bin","codex"),"queue","--thread",w["thread_id"],"--message",msg],check=True,capture_output=True,timeout=60);final="queued";info="queue accepted; host consumption and Codex turn completion are not confirmed"
         elif mode=="codex_exec":
             # A detached process is not evidence of a successfully resumed turn.
             suffix=key.replace(':','-');output=rdir(root,rid)/f"codex-{suffix}.jsonl"
@@ -275,12 +276,13 @@ def public(x):return {k:x[k] for k in ("id","name","status","iteration","phase_i
 def main(argv=None):
     p=argparse.ArgumentParser(prog="lho");p.add_argument("--state-dir");s=p.add_subparsers(dest="cmd",required=True)
     q=s.add_parser("validate");q.add_argument("contract")
-    q=s.add_parser("start");q.add_argument("contract");q.add_argument("--backend",choices=["local","tmux","slurm","systemd"],default="local");q.add_argument("--run-id");q.add_argument("--wait-preflight",action="store_true");q.add_argument("--preflight-timeout",type=float,default=30)
+    q=s.add_parser("start");q.add_argument("contract");q.add_argument("--backend",choices=["local","tmux","slurm","systemd"],default="local");q.add_argument("--run-id");q.add_argument("--wait-preflight",action="store_true");q.add_argument("--preflight-timeout",type=float,default=30);q.add_argument("--require-wakeup",action="store_true")
     q=s.add_parser("supervise");q.add_argument("run_id")
     for name in ("status","pause","cancel"):
         q=s.add_parser(name);q.add_argument("run_id")
     q=s.add_parser("report");q.add_argument("run_id");q.add_argument("--json",action="store_true")
     q=s.add_parser("resume");q.add_argument("run_id");q.add_argument("--retry-wakeup",action="store_true");q.add_argument("--approve-checkpoint",action="store_true")
+    q=s.add_parser("configure-wakeup");q.add_argument("run_id");q.add_argument("--mode",choices=["codex_queue","codex_exec"],required=True);q.add_argument("--thread-id",required=True);q.add_argument("--codex-bin")
     for name in ("logs","attach"):
         q=s.add_parser(name);q.add_argument("run_id");q.add_argument("--follow",action="store_true");q.add_argument("--lines",type=int,default=80)
     s.add_parser("doctor");a=p.parse_args(argv);root=rootof(a.state_dir)
@@ -290,7 +292,11 @@ def main(argv=None):
         if d["codex"]:d["codex_version"]=subprocess.run([d["codex"],"--version"],text=True,capture_output=True).stdout.strip()
         print(json.dumps(d,indent=2));return 0
     if a.cmd=="start":
-        cfg=contract(a.contract);rid=a.run_id or str(uuid.uuid4());d=rdir(root,rid);(d/"attempts").mkdir(parents=True);(d/"contract.json").write_text(json.dumps(cfg,indent=2));c=connect(root);t=ts();c.execute("INSERT INTO runs(id,name,status,contract,created,updated,started,backend) VALUES(?,?,'STARTING',?,?,?,?,?)",(rid,cfg["name"],json.dumps(cfg),t,t,t,a.backend));c.commit()
+        cfg=contract(a.contract)
+        if cfg['wakeup'].get('mode','none')=='none':
+            if a.require_wakeup:raise SystemExit('automatic wakeup required, but wakeup.mode=none; configure a verified thread before launching')
+            print('WARNING: wakeup.mode=none; no automatic Codex notification will be sent',file=sys.stderr,flush=True)
+        rid=a.run_id or str(uuid.uuid4());d=rdir(root,rid);(d/"attempts").mkdir(parents=True);(d/"contract.json").write_text(json.dumps(cfg,indent=2));c=connect(root);t=ts();c.execute("INSERT INTO runs(id,name,status,contract,created,updated,started,backend) VALUES(?,?,'STARTING',?,?,?,?,?)",(rid,cfg["name"],json.dumps(cfg),t,t,t,a.backend));c.commit()
         try:sid=launch(root,rid,a.backend)
         except BaseException:c.execute("DELETE FROM runs WHERE id=?",(rid,));c.commit();shutil.rmtree(d);raise
         c.execute("UPDATE runs SET scheduler_id=? WHERE id=?",(sid,rid));c.commit();print(rid,flush=True)
@@ -305,6 +311,20 @@ def main(argv=None):
     if a.cmd=="supervise":return supervise(root,a.run_id)
     c=connect(root);x=row(c,a.run_id)
     if a.cmd=="status":print(json.dumps(public(x),indent=2));return 0
+    if a.cmd=="configure-wakeup":
+        if not a.thread_id.strip():raise SystemExit('verified thread_id required')
+        if a.codex_bin and not shutil.which(a.codex_bin):raise SystemExit('codex executable unavailable')
+        c.execute('BEGIN IMMEDIATE');x=row(c,a.run_id)
+        if x['status'] in TERMINAL:c.rollback();raise SystemExit('cannot reconfigure a terminal run; delivery history is preserved')
+        cfg=json.loads(x['contract']);previous=cfg.get('wakeup',{'mode':'none'});w=dict(previous);w.update(mode=a.mode,thread_id=a.thread_id)
+        if a.codex_bin:w['codex_bin']=a.codex_bin
+        cfg['wakeup']=w
+        try:
+            c.execute('UPDATE runs SET contract=?,updated=? WHERE id=?',(json.dumps(cfg),ts(),a.run_id))
+            c.execute('INSERT INTO events(run_id,event_key,kind,created,payload) VALUES(?,?,?,?,?)',(a.run_id,'wakeup-config:'+uuid.uuid4().hex,'wakeup_configured',ts(),json.dumps({'previous_mode':previous.get('mode','none'),'mode':a.mode,'thread_id':a.thread_id})))
+            atomic_json(rdir(root,a.run_id)/'contract.json',cfg);c.commit()
+        except BaseException:c.rollback();raise
+        print(json.dumps({'mode':a.mode,'thread_id':a.thread_id,'scope':'future notifications; running worker, budgets and delivery history preserved'}));return 0
     if a.cmd=="pause":c.execute("UPDATE runs SET pause_requested=1,updated=? WHERE id=?",(ts(),a.run_id));c.commit();print("pause requested");return 0
     if a.cmd=="cancel":
         c.execute("UPDATE runs SET cancel_requested=1,lease_until=NULL,updated=? WHERE id=?",(ts(),a.run_id));c.commit()

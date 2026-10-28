@@ -16,7 +16,9 @@ python3 scripts/lho --state-dir /absolute/path/to/state report RUN_ID --json
 - `WAITING_FOR_CODEX` 且唤醒为 `pending`：运行 `supervise RUN_ID` 恢复尚未发送的检查点通知。恢复过程不重跑阶段；审查后仍需 `resume RUN_ID --approve-checkpoint` 才会推进。
 - 检查点或终态的 `dispatching` 超过投递时限：再次运行 `supervise RUN_ID` 会将其显式标记为 `dispatch_unknown`。阈值为适配器超时加 60 秒宽限；`codex_exec` 使用配置的 `wakeup.timeout_seconds`（默认 300），其他适配器使用 60 秒。
 - `dispatch_unknown`：检查目标 thread 和投递证据，只有确认没有送达后才运行 `resume RUN_ID --retry-wakeup`。重试记录保存在事件中；不会自动重发投递不明的通知。
-- `sent`：含义取决于适配器。`codex_queue` 表示命令成功入队；`codex_exec` 还要求观察到 `turn.completed`。后者的输出属于独立 CLI 进程，不能据此断言已打开的 TUI 已刷新。
+- `queued`：`codex_queue` 命令成功入队，尚未确认宿主消费和回合完成。原回合仍在执行时，排队消息可能等到该回合结束后才进入上下文。不能因排队而另行启动同一 thread 的并发 `codex_exec`。
+- `sent`：`codex_exec` 要求观察到 `turn.completed`，输出属于独立 CLI 进程；`command` 表示配置的命令成功。旧版 `codex_queue` 的历史记录也可能是 `sent`，需要结合适配器及会话记录解释，不能当成回合完成证据。
+- `manual_required` 且契约为 `wakeup.mode: "none"`：根本没有自动通知。为仍在运行的任务使用 `configure-wakeup RUN_ID --mode codex_queue --thread-id VERIFIED_THREAD_ID` 配置未来通知；不要给已经结束的旧任务补发通知碰运气。
 
 示例中的子命令均可接在 `python3 scripts/lho --state-dir /absolute/path/to/state` 后。实际 run ID、state 目录和 thread ID 应来自目标主机证据。
 

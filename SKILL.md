@@ -9,8 +9,8 @@ description: Run durable inference/training or other long pipelines outside the 
 
 1. 检查 pipeline、成功产物、进度信号、安全停止行为和成本上限。绝不虚构成功证据。
 2. 阅读 [task-contract.md](references/task-contract.md) 并创建 JSON 契约。优先使用 argv 数组；仅在确有需要时启用 shell。
-3. 从可信宿主上下文获取当前 Codex thread ID。绝不猜测；无法获取时使用 `wakeup.mode: "none"`。
-4. 运行 `python3 scripts/lho start CONTRACT --wait-preflight`（从归档安装且没有可执行位时，Python 前缀同样有效）。检查早期步骤和启动日志。确认健康后结束 Codex 回合；绝不使用模型调用轮询长任务。
+3. 从可信宿主上下文获取当前 Codex thread ID。绝不猜测。自动恢复任务不得静默降级为 `wakeup.mode: "none"`；仅在用户接受手动恢复时使用 `none`，并明确报告不会自动唤醒。原生 TUI 会话优先使用已验证的 `codex_queue`；它依赖宿主消费队列，原回合仍在执行时通知会等待。无人消费队列的部署需要已验证的独立 `codex_exec` 路径，不能承诺原 TUI 刷新。
+4. 自动唤醒任务运行 `python3 scripts/lho start CONTRACT --require-wakeup --wait-preflight`（从归档安装且没有可执行位时，Python 前缀同样有效）。检查早期步骤和启动日志，确认实际使用的唤醒模式；`queued` 只代表队列接收，不代表恢复回合已完成。确认健康后结束 Codex 回合；绝不使用模型调用轮询长任务。
 5. 独立 Runner 负责等待、阶段转换、重试、验证、预算和唤醒。恢复后运行 `scripts/lho report RUN_ID --json`，核验证据；仅在尚未满足终止条件时启动下一次有界运行。
 
 使用 `status`、`logs`、`attach`、`pause`、`resume`、`cancel` 和 `report`。阅读 [operations.md](references/operations.md)。无人值守恢复需要持久 Supervisor 服务或独立 Watchdog；仅有独立本地进程并不等于操作系统重启服务。
