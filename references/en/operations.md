@@ -17,6 +17,8 @@ State defaults to `~/.local/state/long-horizon-orchestrator`; override with `LHO
 
 Workers atomically persist results. A replacement supervisor recovers them; a renewable SQLite lease prevents duplicate advancement. Pause finishes the active command then stops. Cancel targets only the recorded process group. Logs/attach never invoke a model.
 
+Phase `timeout_seconds` uses a monotonic clock, matching the acceptance workload's duration measurement. Results include `elapsed_seconds` and `elapsed_clock`; calendar `started_at` and `finished_at` remain audit timestamps. Calendar-clock changes or host sleep can make their difference disagree with monotonic duration. The persisted run-level `max_wall_seconds` remains an independent calendar-time budget.
+
 `codex_exec` waits for an actual `turn.completed` notification before marking a wakeup sent. Stream evidence is stored in `codex-<event>.jsonl`. Optional `wakeup.config` accepts Codex config override strings, and `wakeup.timeout_seconds` bounds a resumed turn (default 300). A failed or unconfirmed turn becomes `dispatch_unknown`; it is never silently reported as successful.
 
 Local `codex_exec` deliveries to the same thread are serialized with an OS file lock, including across state directories. Lock waiting makes no model calls. The default shared directory is `~/.local/state/long-horizon-orchestrator/thread-locks`; use `LHO_WAKEUP_LOCK_DIR` to select another shared directory and `wakeup.lock_timeout_seconds` to bound waiting (default 300). The lock coordinates this runner's clients, not unrelated native TUI writers. Each retry validates only its new output; historical `turn.completed` events cannot confirm a new delivery.

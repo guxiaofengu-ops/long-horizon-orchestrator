@@ -48,7 +48,8 @@ def workload(args):
         elapsed = time.monotonic() - mono
         step += 1
         sample = sum((0.5 * x - 2 * x) ** 2 for x in range(128)) / 128
-        record = {'step': step, 'phase': args.phase, 'utc': utc(), 'elapsed_seconds': elapsed, 'mse': sample}
+        record = {'step': step, 'phase': args.phase, 'utc': utc(), 'elapsed_seconds': elapsed,
+                  'wall_elapsed_seconds': time.time() - started, 'elapsed_clock': 'monotonic', 'mse': sample}
         with progress.open('a', encoding='utf-8') as f:
             f.write(json.dumps(record) + '\n')
             f.flush()
@@ -60,6 +61,7 @@ def workload(args):
     atomic(Path(args.result), {'fixture': 'synthetic-numerical-soak', 'phase': args.phase,
                               'started_at': started, 'finished_at': time.time(),
                               'elapsed_seconds': time.monotonic() - mono,
+                              'wall_elapsed_seconds': time.time() - started, 'elapsed_clock': 'monotonic',
                               'minimum_seconds': args.seconds, 'progress_steps': step,
                               'mse': sample, 'ok': True})
 

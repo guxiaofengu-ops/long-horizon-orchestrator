@@ -17,6 +17,8 @@ scripts/lho report RUN_ID --json
 
 Worker 会原子持久化结果。替代 Supervisor 可以恢复结果；可续期的 SQLite 租约会阻止重复推进。`pause` 等待当前命令完成后停止；`cancel` 只针对已记录的 POSIX 进程组或 Windows Job Object。`logs` 和 `attach` 永远不会调用模型。
 
+阶段 `timeout_seconds` 使用单调时钟，与验收负载的运行时长保持一致；结果另存 `elapsed_seconds` 和 `elapsed_clock`。`started_at`、`finished_at` 为用于审计的日历时间，二者之差可能受主机时钟调整或休眠影响，不作为阶段超时的计时依据。运行级 `max_wall_seconds` 仍按持久化日历时间独立限制总预算。
+
 `codex_exec` 会等待实际的 `turn.completed` 通知，之后才把唤醒标记为已发送。流式证据保存在 `codex-<event>.jsonl`。可选的 `wakeup.config` 接受 Codex 配置覆盖字符串，`wakeup.timeout_seconds` 限制恢复回合的时长（默认 300）。失败或未确认的回合会变成 `dispatch_unknown`，绝不会被静默报告为成功。
 
 同一 thread 的本地 `codex_exec` 投递通过操作系统文件锁串行执行，避免训练提前结束时与检查点分析回合争抢 thread writer。锁等待不调用模型。默认锁目录为 `~/.local/state/long-horizon-orchestrator/thread-locks`，可通过 `LHO_WAKEUP_LOCK_DIR` 指定所有协作 Runner 共享的位置；`wakeup.lock_timeout_seconds` 限制锁等待时长（默认 300）。此锁只协调使用本运行器的客户端，无法替其他原生 TUI 客户端管理回合。重试结果仅验证本次调用的新输出，历史 `turn.completed` 不作为新投递的成功证据。
