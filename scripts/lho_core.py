@@ -2,6 +2,7 @@
 import argparse,json,os,shutil,signal,sqlite3,subprocess,sys,time,uuid,shlex,tempfile
 from pathlib import Path
 from lho_process import WINDOWS,alive,detached_options,identity,stop_named_job,stop_worker
+from lho_dispatch import thread_writer
 TERMINAL={"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"}
 SCHEMA="""PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,name TEXT,status TEXT,contract TEXT,created REAL,updated REAL,started REAL,finished REAL,iteration INTEGER DEFAULT 0,phase_index INTEGER DEFAULT 0,phase_runs INTEGER DEFAULT 0,failures INTEGER DEFAULT 0,preflight_seen INTEGER DEFAULT 0,preflight_passed INTEGER DEFAULT 0,backend TEXT,scheduler_id TEXT,worker_pid INTEGER,lease_owner TEXT,lease_until REAL,pause_requested INTEGER DEFAULT 0,cancel_requested INTEGER DEFAULT 0,last_error TEXT,wake_status TEXT DEFAULT 'pending');
@@ -166,10 +167,16 @@ def wake(c,root,rid,key,status,detail):
             suffix=key.replace(':','-');output=rdir(root,rid)/f"codex-{suffix}.jsonl"
             cmd=[w.get("codex_bin","codex"),"exec","resume",w["thread_id"],msg,"--json","--skip-git-repo-check"]
             for option in w.get("config",[]):cmd.extend(["-c",option])
-            with open(output,"ab",buffering=0) as out:
-                completed=subprocess.run(cmd,cwd=cfg["workspace"],stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,timeout=float(w.get("timeout_seconds",300)))
+            def waiting_for_writer():
+                c.execute("UPDATE wakeups SET updated=? WHERE run_id=? AND event_key=? AND status='dispatching'",(ts(),rid,key));c.commit()
+            with thread_writer(w['thread_id'],timeout=float(w.get('lock_timeout_seconds',300)),on_wait=waiting_for_writer):
+                with open(output,"ab",buffering=0) as out:
+                    offset=out.tell()
+                    completed=subprocess.run(cmd,cwd=cfg["workspace"],stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,timeout=float(w.get("timeout_seconds",300)))
             notifications=[]
-            for line in output.read_text(encoding="utf-8",errors='replace').splitlines():
+            # A previously completed turn cannot prove that a later retry worked.
+            with output.open('rb') as stream:stream.seek(offset);current_output=stream.read().decode('utf-8',errors='replace')
+            for line in current_output.splitlines():
                 try:notifications.append(json.loads(line))
                 except json.JSONDecodeError:pass
             if completed.returncode!=0 or not any(e.get('type')=='turn.completed' for e in notifications) or any(e.get('type')=='turn.failed' for e in notifications):raise RuntimeError(f"Codex resume failed; inspect {output}")

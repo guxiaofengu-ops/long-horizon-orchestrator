@@ -19,6 +19,8 @@ Worker 会原子持久化结果。替代 Supervisor 可以恢复结果；可续�
 
 `codex_exec` 会等待实际的 `turn.completed` 通知，之后才把唤醒标记为已发送。流式证据保存在 `codex-<event>.jsonl`。可选的 `wakeup.config` 接受 Codex 配置覆盖字符串，`wakeup.timeout_seconds` 限制恢复回合的时长（默认 300）。失败或未确认的回合会变成 `dispatch_unknown`，绝不会被静默报告为成功。
 
+同一 thread 的本地 `codex_exec` 投递通过操作系统文件锁串行执行，避免训练提前结束时与检查点分析回合争抢 thread writer。锁等待不调用模型。默认锁目录为 `~/.local/state/long-horizon-orchestrator/thread-locks`，可通过 `LHO_WAKEUP_LOCK_DIR` 指定所有协作 Runner 共享的位置；`wakeup.lock_timeout_seconds` 限制锁等待时长（默认 300）。此锁只协调使用本运行器的客户端，无法替其他原生 TUI 客户端管理回合。重试结果仅验证本次调用的新输出，历史 `turn.completed` 不作为新投递的成功证据。
+
 如果唤醒状态为 `dispatch_unknown`，请检查目标 thread，并且仅在确认未投递后使用 `resume --retry-wakeup`。安装时将此目录复制到 `~/.codex/skills/long-horizon-orchestrator`。
 
 自动恢复任务使用 `start CONTRACT --require-wakeup --wait-preflight`。该选项会在启动前拒绝 `wakeup.mode: "none"`；兼容的手动启动方式仍可使用 `none`，但会在 stderr 明确警告不会自动通知。`codex_queue` 成功时记录为 `queued`，只有队列接收得到确认；原回合繁忙或宿主未消费队列时，不代表模型已开始执行。`codex_exec` 的 `sent` 则要求完整回合证据。

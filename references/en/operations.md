@@ -19,4 +19,6 @@ Workers atomically persist results. A replacement supervisor recovers them; a re
 
 `codex_exec` waits for an actual `turn.completed` notification before marking a wakeup sent. Stream evidence is stored in `codex-<event>.jsonl`. Optional `wakeup.config` accepts Codex config override strings, and `wakeup.timeout_seconds` bounds a resumed turn (default 300). A failed or unconfirmed turn becomes `dispatch_unknown`; it is never silently reported as successful.
 
+Local `codex_exec` deliveries to the same thread are serialized with an OS file lock, including across state directories. Lock waiting makes no model calls. The default shared directory is `~/.local/state/long-horizon-orchestrator/thread-locks`; use `LHO_WAKEUP_LOCK_DIR` to select another shared directory and `wakeup.lock_timeout_seconds` to bound waiting (default 300). The lock coordinates this runner's clients, not unrelated native TUI writers. Each retry validates only its new output; historical `turn.completed` events cannot confirm a new delivery.
+
 If wakeup is `dispatch_unknown`, inspect the thread and use `resume --retry-wakeup` only after confirming non-delivery. Install by copying this folder to `~/.codex/skills/long-horizon-orchestrator`.
