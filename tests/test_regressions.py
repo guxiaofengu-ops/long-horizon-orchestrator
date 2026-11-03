@@ -88,7 +88,12 @@ class RegressionTests(unittest.TestCase):
         cfg = json.loads(path.read_text())
         cfg['phases'][0].pop('progress_jsonl')
         path.write_text(json.dumps(cfg))
-        self.assertNotEqual(self.cli('start', str(path), '--wait-preflight', check=False).returncode, 0)
+        result = self.cli('start', str(path), '--wait-preflight', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        # The start command returns as soon as failure is visible, before the
+        # detached supervisor finishes delivery and releases its SQLite lease.
+        rid = result.stdout.splitlines()[0]
+        self.assertEqual(self.wait(rid)['status'], 'FAILED')
 
     def test_older_checkpoint_cannot_overwrite_terminal_dispatch(self):
         path, _ = self.cfg()
