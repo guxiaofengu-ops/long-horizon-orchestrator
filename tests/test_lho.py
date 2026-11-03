@@ -22,7 +22,9 @@ class Tests(unittest.TestCase):
  def wait(self,rid):
   for _ in range(200):
    x=json.loads(self.cli("status",rid).stdout)
-   if x["status"] in {"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"} and x["wake_status"] in {'sent','queued','manual_required','dispatch_unknown'}:return x
+   # Confirmed delivery precedes the dispatcher's final report and lease cleanup.
+   # Deleting fixtures before that exit can race SQLite file creation on macOS.
+   if x["status"] in {"SUCCEEDED","FAILED","CANCELLED","BUDGET_EXCEEDED"} and x["wake_status"] in {'sent','queued','manual_required','dispatch_unknown'} and not x.get('lease_owner'):return x
    time.sleep(.05)
   supervisor=self.state/'runs'/rid/'supervisor.log'
   detail=supervisor.read_text(encoding='utf-8',errors='replace')[-6000:] if supervisor.exists() else 'no supervisor log'
